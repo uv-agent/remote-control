@@ -1,6 +1,6 @@
 [project]
 name = "uv-agent-remote-control"
-version = "0.1.0"
+version = "0.1.1"
 description = "Remote-control web panel plugin for uv-agent."
 readme = "README.md"
 requires-python = ">=3.12"
