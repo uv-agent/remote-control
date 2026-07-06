@@ -1,0 +1,43 @@
+[project]
+name = "uv-agent-remote-control"
+version = "0.1.0"
+description = "Remote-control web panel plugin for uv-agent."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "uv-agent>=0.21.2",
+]
+
+[project.entry-points."uv_agent.plugins"]
+remote-control = "uv_agent_remote_control:plugin"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/uv_agent_remote_control"]
+artifacts = [
+    "src/uv_agent_remote_control/web/**",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/frontend",
+    "/package-lock.json",
+    "/package.json",
+    "/pyproject.toml",
+    "/README.md",
+    "/src",
+    "/tests",
+    "/tsconfig.json",
+    "/vite.config.ts",
+]
+artifacts = [
+    "src/uv_agent_remote_control/web/**",
+]

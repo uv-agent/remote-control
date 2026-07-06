@@ -1,0 +1,14 @@
+node_modules/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.codex-tmp/
+.uv-agent/
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db

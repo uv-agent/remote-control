@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check frontend
+        run: npm run web:check
+
+      - name: Build frontend assets
+        run: npm run web:build
+
+      - name: Install Python dependencies
+        run: uv sync --locked --dev
+
+      - name: Run Python tests
+        run: uv run pytest
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Check distributions
+        run: uvx twine check --strict dist/*
+
+      - name: Verify frontend assets are packaged
+        shell: bash
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          required = [
+              "uv_agent_remote_control/web/index.html",
+              "uv_agent_remote_control/web/app.js",
+              "uv_agent_remote_control/web/styles.css",
+          ]
+
+          wheel = next(Path("dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          missing = [name for name in required if name not in names]
+          has_chunk = any(
+              name.startswith("uv_agent_remote_control/web/chunks/") and name.endswith(".js")
+              for name in names
+          )
+          if missing or not has_chunk:
+              raise SystemExit(f"Wheel is missing frontend assets: missing={missing}, has_chunk={has_chunk}")
+
+          sdist = next(Path("dist").glob("*.tar.gz"))
+          with tarfile.open(sdist) as archive:
+              names = set(archive.getnames())
+          missing = [name for name in required if not any(candidate.endswith(name) for candidate in names)]
+          has_chunk = any(
+              candidate.endswith(".js") and "/uv_agent_remote_control/web/chunks/" in candidate
+              for candidate in names
+          )
+          if missing or not has_chunk:
+              raise SystemExit(f"Sdist is missing frontend assets: missing={missing}, has_chunk={has_chunk}")
+          PY
