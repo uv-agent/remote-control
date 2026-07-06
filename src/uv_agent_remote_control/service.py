@@ -160,7 +160,6 @@ class RemoteControlService:
         self._thread: threading.Thread | None = None
         self._url = ""
         self._unsubscribe = None
-        self._handles: dict[str, Any] = {}
 
     @property
     def url(self) -> str:
@@ -214,8 +213,6 @@ class RemoteControlService:
                 _feature("composer", "输入框", "available" if has_submit else "unavailable", "多行输入、档位、冲突策略和提交"),
                 _feature("attachments", "附件", "available" if has_blobs and has_submit else "unavailable", "图片上下文和文件素材"),
                 _feature("status", "状态", "available", "连接状态、会话保护和远程入口"),
-                _feature("interrupt", "停止", "available", "停止当前插件提交的运行请求"),
-                _feature("config", "配置", "partial", "已显示远程控制配置，安全编辑仍等待 Core 接口"),
                 _feature("models", "模型", _model_feature_status(core, model_levels), _model_feature_detail(core, model_levels)),
                 _feature("mcp", "MCP", _picker_feature_status(core, mcp), _picker_feature_detail(core, mcp, label="MCP")),
                 _feature("skills", "技能", _picker_feature_status(core, skills), _picker_feature_detail(core, skills, label="技能")),
@@ -324,10 +321,6 @@ class RemoteControlService:
             timeout=10.0,
         )
         request_id = str(getattr(handle, "request_id", "") or "")
-        if request_id:
-            with self._lock:
-                self._handles[request_id] = handle
-            asyncio.run_coroutine_threadsafe(self._forget_handle_when_done(request_id, handle), self.loop)
         self.events.publish(
             {
                 "kind": "turn_submitted",
@@ -337,14 +330,6 @@ class RemoteControlService:
             }
         )
         return {"ok": True, "thread_id": thread_id, "request_id": request_id, "status": str(getattr(handle, "status", "queued"))}
-
-    async def _forget_handle_when_done(self, request_id: str, handle) -> None:
-        try:
-            await handle.wait()
-        finally:
-            with self._lock:
-                if self._handles.get(request_id) is handle:
-                    self._handles.pop(request_id, None)
 
     def _prepare_attachments(self, text: str, attachments_meta: list[Any], files: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         prepared: list[dict[str, Any]] = []
@@ -371,9 +356,6 @@ class RemoteControlService:
                 if slot <= 0 or token != f"[Image #{slot}]":
                     raise ValueError(f"invalid image token: {token!r}")
             elif kind == "file":
-                # TODO: Add richer non-image preview/content policies once core
-                # has an explicit file-reading contract. For now files remain
-                # blob references named in the canonical token only.
                 if not token.startswith("[File ") or not token.endswith("]") or " id=" in token:
                     raise ValueError(f"invalid file token: {token!r}")
                 slot = None
@@ -391,22 +373,6 @@ class RemoteControlService:
                 item["slot"] = slot
             prepared.append(item)
         return prepared
-
-    def _cancel_thread(self, thread_id: str) -> dict[str, Any]:
-        cancelled: list[str] = []
-        with self._lock:
-            handles = list(self._handles.items())
-        for request_id, handle in handles:
-            if str(getattr(handle, "thread_id", "") or "") != thread_id:
-                continue
-            status = str(getattr(handle, "status", "") or "")
-            if status in {"completed", "failed", "interrupted", "cancelled", "merged"}:
-                continue
-            cancel_event = getattr(handle, "cancel_event", None)
-            if cancel_event is not None:
-                cancel_event.set()
-                cancelled.append(request_id)
-        return {"ok": True, "thread_id": thread_id, "cancelled": cancelled}
 
     def _verify_auth_code(self, code: str) -> dict[str, Any]:
         return self._run_async(self.context.actions.call("auth_code.verify", {"code": code}), timeout=10.0)
@@ -523,9 +489,6 @@ class RemoteControlService:
                     payload, files = self._read_payload_and_files()
                     payload["thread_id"] = thread_id
                     self._send_json(service._submit_turn(payload, files))
-                    return
-                if thread_id and suffix == "/cancel":
-                    self._send_json(service._cancel_thread(thread_id))
                     return
                 if thread_id and suffix == "/title":
                     payload = self._read_json()
@@ -770,17 +733,17 @@ def _safe_call(fn, *args, default=None, **kwargs):
 def _model_feature_status(core: dict[str, Any], levels: list[Any]) -> str:
     models = core.get("models") if isinstance(core.get("models"), dict) else {}
     if not core.get("agent_api"):
-        return "needs_core_api"
+        return "unavailable"
     if levels:
         return "available"
     if models.get("available"):
-        return "partial"
+        return "available"
     return "unavailable"
 
 
 def _model_feature_detail(core: dict[str, Any], levels: list[Any]) -> str:
     if not core.get("agent_api"):
-        return "等待 Core 暴露模型和档位摘要"
+        return "Core 未提供模型档位摘要"
     default_level = ""
     models = core.get("models") if isinstance(core.get("models"), dict) else {}
     if isinstance(models, dict):
@@ -793,15 +756,15 @@ def _model_feature_detail(core: dict[str, Any], levels: list[Any]) -> str:
 
 def _picker_feature_status(core: dict[str, Any], picker: dict[str, Any]) -> str:
     if not core.get("agent_api"):
-        return "needs_core_api"
+        return "unavailable"
     if picker.get("available"):
         return "available"
-    return "partial"
+    return "unavailable"
 
 
 def _picker_feature_detail(core: dict[str, Any], picker: dict[str, Any], *, label: str) -> str:
     if not core.get("agent_api"):
-        return f"等待 Core 暴露 {label} 摘要"
+        return f"Core 未提供 {label} 摘要"
     if picker.get("available"):
         total = int(picker.get("total") or len(picker.get("items") or []))
         return f"{label} 插入源已接入，{total} 个条目"

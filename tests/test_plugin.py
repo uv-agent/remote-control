@@ -265,8 +265,8 @@ def test_service_capabilities_reports_tui_coverage(tmp_path: Path) -> None:
             by_id = {item["id"]: item for item in capabilities["tui_features"]}
             assert by_id["threads"]["status"] == "available"
             assert by_id["composer"]["status"] == "available"
-            assert by_id["models"]["status"] == "needs_core_api"
-            assert by_id["mcp"]["status"] == "needs_core_api"
+            assert by_id["models"]["status"] == "unavailable"
+            assert by_id["mcp"]["status"] == "unavailable"
         finally:
             service.stop()
 

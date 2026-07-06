@@ -11,11 +11,9 @@ import {
   AtSign,
   ChevronLeft,
   ChevronRight,
-  CircleStop,
   Copy,
   FilePlus2,
   Folder,
-  GitFork,
   Info,
   Image as ImageIcon,
   Moon,
@@ -37,202 +35,112 @@ import {
   X,
 } from "lucide-react";
 import "./styles.css";
-
-type Json = Record<string, unknown>;
-
-type ProjectInfo = {
-  name?: string;
-  path?: string;
-};
-
-type RemoteConfig = {
-  url?: string;
-  host?: string;
-  port?: number;
-  auth_mode?: string;
-  last_seq?: number;
-  project?: ProjectInfo;
-};
-
-type RemoteCapabilities = {
-  limits?: {
-    max_attachments?: number;
-    max_file_bytes?: number;
-    max_message_bytes?: number;
-    sse_ring_max_events?: number;
-    sse_ring_max_bytes?: number;
-  };
-  tui_features?: CapabilityFeature[];
-  core?: CoreSummary;
-};
-
-type CapabilityFeature = {
-  id?: string;
-  label?: string;
-  status?: string;
-  detail?: string;
-};
-
-type CoreSummary = {
-  agent_api?: boolean;
-  models?: ModelSummary;
-  pickers?: Record<string, PickerSummary>;
-};
-
-type ModelSummary = {
-  available?: boolean;
-  default_level?: string;
-  levels?: ModelLevelSummary[];
-};
-
-type ModelLevelSummary = {
-  id?: string;
-  label?: string;
-  model?: string;
-  model_name?: string;
-  provider?: string;
-  api?: string;
-  context_window_tokens?: number;
-  supports_images?: boolean | null;
-  provider_configured?: boolean;
-  status?: string;
-  is_default?: boolean;
-};
-
-type PickerSummary = {
-  available?: boolean;
-  plugin?: string;
-  id?: string;
-  title?: string | Record<string, string>;
-  trigger?: string;
-  total?: number;
-  items?: PickerItemSummary[];
-};
-
-type PickerItemSummary = {
-  id?: string;
-  value?: string;
-  description?: string;
-  kind?: string;
-  meta?: string;
-};
-
-type Thread = {
-  thread_id: string;
-  title?: string;
-  updated_at?: string;
-  status?: string;
-  active_model?: string;
-  active_level?: string;
-  turn_count?: number;
-  last_text?: string;
-};
-
-type TimelineEvent = Json & {
-  _event_id?: number | string;
-  thread_id?: string;
-  type?: string;
-  item?: Json;
-  output?: unknown;
-  text?: string;
-  delta?: string;
-  reasoning_text?: string;
-  message?: string;
-  title?: string;
-  name?: string;
-  tool_name?: string;
-  call_id?: string;
-  created_at?: string;
-  timestamp?: string;
-  attempt?: string | number;
-  attachment?: {
-    filename?: string;
-    token?: string;
-    canonical_token?: string;
-  };
-};
-
-type AttachmentDraft = {
-  id: string;
-  file: File;
-  kind: "image" | "file";
-  token: string;
-  slot: number | null;
-  filename: string;
-  mime_type: string;
-};
-
-type Status = {
-  label: string;
-  className: "running" | "done" | "error" | "muted";
-};
-
-type InfoTab = "overview" | "events" | "attachments" | "status";
-type EventFilter = "all" | "message" | "tool" | "system" | "attachment";
-type ThemeName = "deep" | "light";
-type ThreadFilter = "all" | "running" | "done" | "attention";
-type DisplayRole = "user" | "assistant" | "reasoning" | "tool" | "system" | "error";
-type DisplayMessage = {
-  kind: "message";
-  key: string;
-  role: DisplayRole;
-  label: string;
-  text: string;
-  time?: string;
-  occurredAt?: number;
-  editable?: boolean;
-  forkable?: boolean;
-};
-type DisplayChange = {
-  kind: "change";
-  key: string;
-  summary: ChangeSummary;
-};
-type DisplayItem = DisplayMessage | DisplayChange;
-type TurnGroupModel = {
-  key: string;
-  user?: DisplayMessage;
-  items: DisplayItem[];
-};
-
-const LEVEL_OPTIONS = [
-  { value: "", label: "默认" },
-  { value: "small", label: "快速" },
-  { value: "medium", label: "标准" },
-  { value: "large", label: "深度" },
-];
-
-const CONFLICT_OPTIONS = [
-  { value: "queue", label: "排队" },
-  { value: "guide", label: "询问" },
-  { value: "interrupt", label: "接管" },
-  { value: "reject", label: "空闲" },
-];
-const SELECT_DEFAULT_VALUE = "__default__";
-
-const THREAD_FILTER_OPTIONS: Array<{ value: ThreadFilter; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "running", label: "运行" },
-  { value: "done", label: "完成" },
-  { value: "attention", label: "待处理" },
-];
-
-const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-const CACHE_DB_NAME = "uv-agent-remote-control";
-const LEVEL_LABELS: Record<string, string> = {
-  low: "快速",
-  small: "快速",
-  medium: "标准",
-  high: "深度",
-  deep: "深度",
-  large: "深度",
-};
-const CONFLICT_LABELS: Record<string, string> = {
-  queue: "排队运行",
-  guide: "先询问",
-  interrupt: "停止后运行",
-  reject: "忙时不提交",
-};
+import { api } from "./api";
+import { cacheGetEvents, cachePutEvents, openCache } from "./cache";
+import { CONFLICT_OPTIONS, SELECT_DEFAULT_VALUE, SUPPORTED_IMAGE_TYPES, THREAD_FILTER_OPTIONS } from "./constants";
+import { useLocalNumber, useLocalString, useMedia } from "./hooks";
+import { InfoPane } from "./components/InfoPane";
+import type {
+  ActivityDigest,
+  ActivityEntry,
+  AttachmentDraft,
+  CapabilityFeature,
+  DisplayItem,
+  DisplayMessage,
+  EventFilter,
+  InfoTab,
+  Json,
+  MaterialEntry,
+  ModelLevelSummary,
+  PickerItemSummary,
+  PickerSummary,
+  ProjectInfo,
+  RemoteCapabilities,
+  RemoteConfig,
+  Status,
+  ThemeName,
+  Thread,
+  ThreadFilter,
+  TimelineEvent,
+  TurnGroupModel,
+} from "./types";
+import {
+  activityDigest,
+  activityDigestBody,
+  activityDigestTitle,
+  activityEntryForEvent,
+  appendComposerToken,
+  assistantDeltaText,
+  assistantTextForEvent,
+  autoSize,
+  attachmentEvents,
+  capabilityDetail,
+  capabilityRow,
+  capabilityStatus,
+  capabilitySummary,
+  compareThreads,
+  compactText,
+  conflictLabel,
+  connectionState,
+  connectionText,
+  countThreadsByFilter,
+  countUnquotedToken,
+  displayEventKey,
+  displayEventTime,
+  displayItemForEvent,
+  errorMessage,
+  eventCategory,
+  eventLabel,
+  eventSummary,
+  eventTimeLabel,
+  eventTurnKey,
+  filterThreads,
+  formatBytes,
+  formatRelativeTime,
+  formatShortDuration,
+  groupDisplayItems,
+  isAssistantDeltaEvent,
+  isAssistantFinalEvent,
+  isLiveTimelineEvent,
+  isProcessDisplayItem,
+  isProductEvent,
+  isUserDisplayEvent,
+  levelLabel,
+  materialEntries,
+  materialSummaryText,
+  mentionItems,
+  mergeEventsMap,
+  modelLevelOptions,
+  normalizeThreadFilter,
+  needsSpaceBefore,
+  pickerItemTitle,
+  positiveNumber,
+  previewText,
+  processDigestSummary,
+  processWorkLabel,
+  projectUpdatedAt,
+  removeFirstToken,
+  runtimeSummary,
+  shouldFoldText,
+  statusForThread,
+  stripMarkdownMarkers,
+  taskProgressText,
+  textPreview,
+  threadCardMeta,
+  threadRunDetail,
+  threadRunTitle,
+  toolIndexSummary,
+  toolOutputText,
+  uniqueFileToken,
+  uploadLimitText,
+  userTextForEvent,
+  composerFocusDetail,
+  composerHint,
+  composerPlaceholder,
+  composerStateLabel,
+  composerTitle,
+  foldLabel,
+} from "./view-model";
 
 function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
@@ -283,7 +191,6 @@ function App() {
   const threadFilterCounts = useMemo(() => countThreadsByFilter(threads, eventsByThread, liveEvents), [threads, eventsByThread, liveEvents]);
   const runningCount = threads.filter((thread) => statusForThread(thread, eventsByThread, liveEvents).className === "running").length;
   const currentStatus = statusForThread(currentThread, eventsByThread, liveEvents);
-  const currentChanges = summarizeThreadChanges(selectedEvents);
 
   useEffect(() => {
     document.body.dataset.view = view;
@@ -518,20 +425,6 @@ function App() {
     }
   }
 
-  async function cancelThread(threadId: string | null) {
-    if (!threadId) return;
-    try {
-      await api(`/api/threads/${encodeURIComponent(threadId)}/cancel`, { method: "POST", body: {} });
-      showToast("已请求停止");
-    } catch (error) {
-      addLocalError(error);
-    }
-  }
-
-  async function cancelSelectedThread() {
-    await cancelThread(selectedThreadId);
-  }
-
   async function verifyAuth(event: FormEvent) {
     event.preventDefault();
     setAuthError("");
@@ -613,29 +506,6 @@ function App() {
       return;
     }
     setInfoOpen(false);
-  }
-
-  function editMessageDraft(text: string) {
-    setComposerText(text);
-    requestAnimationFrame(() => {
-      composerRef.current?.focus();
-      const length = composerRef.current?.value.length || 0;
-      composerRef.current?.setSelectionRange(length, length);
-    });
-    showToast("已放入输入框");
-  }
-
-  function forkMessageDraft(text: string) {
-    startNewThread();
-    setComposerText(`继续这段内容：\n\n${text}`);
-    showToast("已创建分支草稿");
-  }
-
-  function prepareChangeUndo(summary: ChangeSummary) {
-    const files = summary.files.slice(0, 6).join("\n- ");
-    setComposerText(`请撤销上一轮文件修改。${files ? `\n\n涉及文件：\n- ${files}` : ""}`);
-    requestAnimationFrame(() => composerRef.current?.focus());
-    showToast("已生成撤销请求草稿");
   }
 
   async function copyText(text: string) {
@@ -755,8 +625,6 @@ function App() {
     refreshAll,
     startNewThread,
     openSearch: () => setSearchOpen(true),
-    cancelThread,
-    cancelSelectedThread,
     selectThread,
     selectFirstThread: () => {
       const first = filteredThreads[0] || threads[0];
@@ -782,8 +650,6 @@ function App() {
         close={() => setSearchOpen(false)}
         threads={filteredThreads}
         currentThread={currentThread}
-        status={currentStatus}
-        changes={currentChanges}
         composerText={composerText}
         attachmentCount={attachments.length}
         startNewThread={startNewThread}
@@ -792,9 +658,7 @@ function App() {
         setComposerText={setComposerText}
         focusComposer={focusComposer}
         clearComposer={clearComposer}
-        cancelSelectedThread={() => void cancelSelectedThread()}
         startEditingTitle={startEditingCurrentTitle}
-        prepareChangeUndo={prepareChangeUndo}
       />
       {toast && <div className="toast">{toast}</div>}
         <div className="app-shell">
@@ -811,7 +675,6 @@ function App() {
               liveDrafts={liveDrafts}
               liveReasoningDrafts={liveReasoningDrafts}
               status={currentStatus}
-              changes={currentChanges}
               capabilities={capabilities}
               selectedLevel={selectedLevel}
               setSelectedLevel={setSelectedLevel}
@@ -826,14 +689,10 @@ function App() {
               addSelectedFiles={addSelectedFiles}
               submitComposer={submitComposer}
               sendBusy={sendBusy}
-              cancelSelectedThread={cancelSelectedThread}
               backToList={() => setView("list")}
               openSearch={() => setSearchOpen(true)}
               openInfo={() => toggleInfoPane()}
               openInfoTab={openInfoTab}
-              editMessageDraft={editMessageDraft}
-              forkMessageDraft={forkMessageDraft}
-              prepareChangeUndo={prepareChangeUndo}
               copyText={copyText}
               editingTitle={editingTitle}
               draftTitle={draftTitle}
@@ -855,13 +714,11 @@ function App() {
             eventFilter={eventFilter}
             setEventFilter={setEventFilter}
             close={closeInfoPane}
-            cancelSelectedThread={cancelSelectedThread}
             db={db}
             lastSeq={lastSeq}
             connection={connection}
             runningCount={runningCount}
             status={currentStatus}
-            changes={currentChanges}
           />
         </div>
       </>
@@ -962,8 +819,6 @@ type ShellProps = {
   refreshAll: () => Promise<void>;
   startNewThread: () => void;
   openSearch: () => void;
-  cancelThread: (threadId: string | null) => Promise<void>;
-  cancelSelectedThread: () => Promise<void>;
   selectThread: (threadId: string) => Promise<void>;
   selectFirstThread: () => void;
   treeCollapsed: boolean;
@@ -1108,6 +963,17 @@ function DesktopRail(props: ShellProps) {
   );
 }
 
+function threadMetaItems(project: ProjectInfo | null, thread: Thread | null, level: string) {
+  const items: Array<{ kind: string; label: string; icon?: React.ReactNode }> = [];
+  items.push({ kind: "workspace", label: project?.name || "工作区", icon: <Folder size={13} /> });
+  if (thread?.active_model) items.push({ kind: "model", label: thread.active_model });
+  if (level) items.push({ kind: "level", label: levelLabel(level) });
+  if (thread?.turn_count) items.push({ kind: "turns", label: `${thread.turn_count} 轮` });
+  if (!thread && level) return items;
+  if (!thread) items.push({ kind: "draft", label: "新任务" });
+  return items.slice(0, 4);
+}
+
 function ThreadPane(props: {
   thread: Thread | null;
   project: ProjectInfo | null;
@@ -1116,7 +982,6 @@ function ThreadPane(props: {
   liveDrafts: Map<string, string>;
   liveReasoningDrafts: Map<string, string>;
   status: Status;
-  changes: ChangeSummary | null;
   capabilities: RemoteCapabilities | null;
   selectedLevel: string;
   setSelectedLevel: (value: string) => void;
@@ -1131,14 +996,10 @@ function ThreadPane(props: {
   addSelectedFiles: (files: FileList | null) => void;
   submitComposer: (event: FormEvent) => void;
   sendBusy: boolean;
-  cancelSelectedThread: () => Promise<void>;
   backToList: () => void;
   openSearch: () => void;
   openInfo: () => void;
   openInfoTab: (tab: InfoTab) => void;
-  editMessageDraft: (text: string) => void;
-  forkMessageDraft: (text: string) => void;
-  prepareChangeUndo: (summary: ChangeSummary) => void;
   copyText: (text: string) => Promise<void>;
   editingTitle: boolean;
   draftTitle: string;
@@ -1152,7 +1013,7 @@ function ThreadPane(props: {
   const levelOptions = modelLevelOptions(props.capabilities, props.selectedLevel);
   const draftReady = Boolean(props.composerText.trim() || props.attachments.length);
   const metaItems = threadMetaItems(props.project, props.thread, level);
-  const showRunStrip = props.status.className === "running" || props.status.className === "error" || Boolean(props.changes);
+  const showRunStrip = props.status.className === "running" || props.status.className === "error";
   const dragDepth = useRef(0);
   const [dragActive, setDragActive] = useState(false);
 
@@ -1230,24 +1091,15 @@ function ThreadPane(props: {
         <div className="thread-actions">
           <IconButton title="搜索" onClick={props.openSearch}><Search /></IconButton>
           <IconButton title="信息" onClick={props.openInfo}><Info /></IconButton>
-          <button
-            className="ghost-btn desktop-action"
-            type="button"
-            title="停止当前运行"
-            disabled={props.status.className !== "running"}
-            onClick={() => void props.cancelSelectedThread()}
-          >
-            停止
-          </button>
         </div>
       </header>
       {showRunStrip && (
         <>
           <div className="thread-floating-status" aria-hidden="false">
-            <ThreadRunStrip thread={props.thread} status={props.status} changes={props.changes} level={level} openEvents={() => props.openInfoTab("events")} />
+            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("events")} />
           </div>
           <div className="mobile-status-ribbon">
-            <ThreadRunStrip thread={props.thread} status={props.status} changes={props.changes} level={level} openEvents={() => props.openInfoTab("events")} />
+            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("events")} />
           </div>
         </>
       )}
@@ -1441,7 +1293,6 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
       text: `${previous?.text || ""}${text}`,
       time: eventTimeLabel(event) || previous?.time,
       occurredAt: displayEventTime(event) || previous?.occurredAt,
-      forkable: true,
     });
     return true;
   };
@@ -1467,109 +1318,14 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
   }
   for (const [turnId, text] of props.liveDrafts) {
     if (visibleTurnIds.size && !visibleTurnIds.has(turnId)) continue;
-    items.push({ kind: "message", key: `assistant-draft-${turnId}`, role: "assistant", label: "回复", text, forkable: true });
+    items.push({ kind: "message", key: `assistant-draft-${turnId}`, role: "assistant", label: "回复", text });
   }
   return items;
-}
-
-function displayItemForEvent(event: TimelineEvent, fallback: string): DisplayItem | null {
-  const key = displayEventKey(event, fallback);
-  const occurredAt = displayEventTime(event);
-  if (isUserDisplayEvent(event)) {
-    return { kind: "message", key, role: "user", label: "你", text: userTextForEvent(event), time: eventTimeLabel(event), occurredAt, editable: true };
-  }
-  if (isAssistantFinalEvent(event)) {
-    const text = assistantTextForEvent(event);
-    return { kind: "message", key, role: "assistant", label: "回复", text, time: eventTimeLabel(event), occurredAt, forkable: true };
-  }
-  if (isReasoningEvent(event)) {
-    return { kind: "message", key, role: "reasoning", label: "工作过程", text: event.text || event.reasoning_text || "", time: eventTimeLabel(event), occurredAt };
-  }
-  const directChanges = changeSummaryForEvent(event);
-  if (directChanges) return { kind: "change", key, summary: directChanges };
-  if (event.type === "tool.started" || event.type === "tool.partial") return null;
-  if (event.type === "tool.output" || event.type === "item.tool_output") {
-    return { kind: "message", key, role: "tool", label: "执行记录", text: toolOutputText(event), time: eventTimeLabel(event), occurredAt };
-  }
-  if (event.type === "model.stream_retry") return null;
-  if (event.type === "compaction.started" || event.type === "compaction.completed" || event.type === "item.compaction") return null;
-  if (event.type === "item.image_attachment") {
-    return { kind: "message", key, role: "system", label: "图片", text: event.attachment?.filename || event.attachment?.token || "图片素材", time: eventTimeLabel(event), occurredAt };
-  }
-  if (event.type === "item.file_attachment") {
-    return { kind: "message", key, role: "system", label: "文件", text: event.attachment?.filename || event.attachment?.token || "文件素材", time: eventTimeLabel(event), occurredAt };
-  }
-  if (event.type === "turn.error") {
-    return { kind: "message", key, role: "error", label: "运行失败", text: event.message || "操作失败", time: eventTimeLabel(event), occurredAt };
-  }
-  return null;
-}
-
-function displayEventKey(event: TimelineEvent, fallback: string) {
-  const id = event._event_id ?? event.event_id ?? event.sequence ?? fallback;
-  return `display-${String(id)}`;
-}
-
-function eventTurnKey(event: TimelineEvent, fallback: string) {
-  return String(event.turn_id || event.run_id || event.response_id || event.thread_id || fallback);
-}
-
-function isUserDisplayEvent(event: TimelineEvent) {
-  return event.type === "item.user" || event.type === "turn.submitted";
-}
-
-function isAssistantDeltaEvent(event: TimelineEvent) {
-  return [
-    "response.output_text.delta",
-    "assistant.delta",
-    "assistant.message.delta",
-    "item.assistant_partial",
-  ].includes(String(event.type || ""));
-}
-
-function isAssistantFinalEvent(event: TimelineEvent) {
-  return [
-    "item.model_response",
-    "item.assistant",
-    "assistant.message.completed",
-    "assistant.completed",
-    "response.output_text.done",
-  ].includes(String(event.type || ""));
-}
-
-function isReasoningEvent(event: TimelineEvent) {
-  return [
-    "assistant.reasoning_delta",
-    "assistant.reasoning_completed",
-    "item.reasoning_partial",
-    "item.reasoning",
-  ].includes(String(event.type || ""));
-}
-
-function groupDisplayItems(items: DisplayItem[]) {
-  const groups: TurnGroupModel[] = [];
-  let current: TurnGroupModel | null = null;
-  for (const item of items) {
-    if (item.kind === "message" && item.role === "user") {
-      current = { key: `turn-${item.key}`, user: item, items: [] };
-      groups.push(current);
-      continue;
-    }
-    if (!current) {
-      current = { key: `standalone-${item.key}`, items: [] };
-      groups.push(current);
-    }
-    current.items.push(item);
-  }
-  return groups;
-}
-
-function TurnGroup({ group, props }: { group: TurnGroupModel; props: React.ComponentProps<typeof ThreadPane> }) {
+}function TurnGroup({ group, props }: { group: TurnGroupModel; props: React.ComponentProps<typeof ThreadPane> }) {
   const processItems = group.items.filter(isProcessDisplayItem);
   const contextItems = group.items.filter((item) => item.kind === "message" && item.role === "system");
   const rawResultItems = group.items.filter((item) => !isProcessDisplayItem(item) && !(item.kind === "message" && item.role === "system"));
-  const changeSummary = mergeDisplayChangeItems(rawResultItems.filter((item): item is DisplayChange => item.kind === "change"));
-  const resultItems = rawResultItems.filter((item) => item.kind !== "change");
+  const resultItems = rawResultItems;
   return (
     <motion.section
       layout
@@ -1579,7 +1335,7 @@ function TurnGroup({ group, props }: { group: TurnGroupModel; props: React.Compo
       transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
     >
       {group.user && <TurnUser item={group.user} props={props} />}
-      {!!(contextItems.length || resultItems.length || processItems.length || changeSummary) && (
+      {!!(contextItems.length || resultItems.length || processItems.length) && (
         <motion.div layout className="turn-stack">
           <AnimatePresence initial={false}>
             {contextItems.map((item) => (
@@ -1600,11 +1356,6 @@ function TurnGroup({ group, props }: { group: TurnGroupModel; props: React.Compo
                 <ProcessDigest items={processItems} openEvents={() => props.openInfoTab("events")} />
               </motion.div>
             )}
-            {changeSummary && (
-              <motion.div layout className="turn-motion-item" key={`change-${group.key}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.16, ease: "easeOut" }}>
-                {renderDisplayItem({ kind: "change", key: `change-${group.key}`, summary: changeSummary }, props)}
-              </motion.div>
-            )}
             {resultItems.map((item) => (
               <motion.div
                 layout
@@ -1623,32 +1374,7 @@ function TurnGroup({ group, props }: { group: TurnGroupModel; props: React.Compo
       )}
     </motion.section>
   );
-}
-
-function mergeDisplayChangeItems(items: DisplayChange[]): ChangeSummary | null {
-  if (!items.length) return null;
-  const seen = new Set<string>();
-  const files = new Set<string>();
-  let additions = 0;
-  let deletions = 0;
-  for (const item of items) {
-    const summary = item.summary;
-    const signature = `${[...summary.files].sort().join("|")}::${summary.additions}::${summary.deletions}`;
-    if (seen.has(signature)) continue;
-    seen.add(signature);
-    additions += summary.additions;
-    deletions += summary.deletions;
-    for (const file of summary.files) files.add(file);
-  }
-  if (!files.size && additions === 0 && deletions === 0) return null;
-  return { files: [...files], filesCount: files.size, additions, deletions };
-}
-
-function isProcessDisplayItem(item: DisplayItem) {
-  return item.kind === "message" && (item.role === "reasoning" || item.role === "tool");
-}
-
-function ProcessDigest({ items, openEvents }: { items: DisplayItem[]; openEvents: () => void }) {
+}function ProcessDigest({ items, openEvents }: { items: DisplayItem[]; openEvents: () => void }) {
   const toolCount = items.filter((item) => item.kind === "message" && item.role === "tool").length;
   const reasoningCount = items.filter((item) => item.kind === "message" && item.role === "reasoning").length;
   const previewItems = items.filter((item): item is DisplayMessage => item.kind === "message").slice(-5);
@@ -1676,53 +1402,24 @@ function ProcessDigest({ items, openEvents }: { items: DisplayItem[]; openEvents
       </div>
     </details>
   );
-}
-
-function processDigestSummary(toolCount: number, reasoningCount: number) {
-  const parts = [];
-  if (reasoningCount) parts.push(`${reasoningCount} 步分析`);
-  if (toolCount) parts.push(`${toolCount} 次执行`);
-  return parts.length ? parts.join(" · ") : "正在整理";
-}
-
-function processWorkLabel(items: DisplayMessage[]) {
-  const times = items.map((item) => item.occurredAt || 0).filter(Boolean).sort((a, b) => a - b);
-  if (times.length >= 2) {
-    const duration = Math.max(0, (times.at(-1) || 0) - times[0]);
-    if (duration >= 1000) return `已工作 ${formatShortDuration(duration)}`;
-  }
-  const latest = items.at(-1)?.time;
-  return latest || "已整理";
-}
-
-function formatShortDuration(ms: number) {
-  const seconds = Math.max(1, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds} 秒`;
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  if (minutes < 60) return `${minutes} 分钟`;
-  return `${Math.max(1, Math.round(minutes / 60))} 小时`;
-}
-
-function ThreadRunStrip({
+}function ThreadRunStrip({
   thread,
   status,
-  changes,
   level,
   openEvents,
 }: {
   thread: Thread | null;
   status: Status;
-  changes: ChangeSummary | null;
   level: string;
   openEvents: () => void;
 }) {
-  const detail = threadRunDetail(thread, status, changes, level);
-  const action = changes ? "查看变更" : "查看活动";
+  const detail = threadRunDetail(thread, status, level);
+  const action = "查看活动";
   return (
-    <button className={clsx("thread-run-strip", status.className, changes && "has-changes")} type="button" title={action} aria-label={`${threadRunTitle(thread, status, changes)} ${detail}，${action}`} onClick={openEvents}>
+    <button className={clsx("thread-run-strip", status.className)} type="button" title={action} aria-label={`${threadRunTitle(thread, status)} ${detail}，${action}`} onClick={openEvents}>
       <span className="run-dot" />
       <span className="run-main">
-        <strong>{threadRunTitle(thread, status, changes)}</strong>
+        <strong>{threadRunTitle(thread, status)}</strong>
         <small>{detail}</small>
       </span>
       <span className="run-action" aria-hidden="true">›</span>
@@ -1732,7 +1429,7 @@ function ThreadRunStrip({
 
 function TurnUser({ item, props }: { item: DisplayMessage; props: React.ComponentProps<typeof ThreadPane> }) {
   const folded = shouldFoldText(item.text, 190, 4);
-  const actions = messageActions(item.role, item.text, props.copyText, item.editable ? props.editMessageDraft : undefined);
+  const actions = messageActions(item.text, props.copyText);
   if (!folded) {
     return (
       <div className="turn-user">
@@ -1766,16 +1463,13 @@ function TurnUser({ item, props }: { item: DisplayMessage; props: React.Componen
 }
 
 function renderDisplayItem(item: DisplayItem, props: React.ComponentProps<typeof ThreadPane>) {
-  if (item.kind === "change") {
-    return <ChangeRow key={item.key} summary={item.summary} openEvents={() => props.openInfoTab("events")} undo={props.prepareChangeUndo} />;
-  }
   if (item.role === "system") return <AttachmentLine key={item.key} item={item} />;
   return <FoldBlock key={item.key} item={item} props={props} />;
 }
 
 function FoldBlock({ item, props }: { item: DisplayMessage; props: React.ComponentProps<typeof ThreadPane> }) {
   const collapsed = item.role === "tool" || item.role === "reasoning" || shouldFoldText(item.text, item.role === "assistant" ? 1200 : 420, item.role === "assistant" ? 16 : 7);
-  const actions = messageActions(item.role, item.text, props.copyText, undefined, item.forkable ? props.forkMessageDraft : undefined);
+  const actions = messageActions(item.text, props.copyText);
   return (
     <details className={clsx("fold-block", item.role)} open={!collapsed}>
       <summary>
@@ -1901,136 +1595,8 @@ function AttachmentLine({ item }: { item: DisplayMessage }) {
       {item.time && <span className="context-time">{item.time}</span>}
     </div>
   );
-}
-
-function threadRunTitle(thread: Thread | null, status: Status, changes: ChangeSummary | null) {
-  if (!thread) return "准备开始新任务";
-  if (changes) return "更改";
-  if (status.className === "running") return "运行中";
-  if (status.className === "error") return "待处理";
-  if (status.label === "已停止") return "已停止";
-  return status.className === "done" ? "已完成" : "就绪";
-}
-
-function threadRunDetail(thread: Thread | null, status: Status, changes: ChangeSummary | null, level: string) {
-  if (!thread) return "输入消息后会创建新的线程";
-  const model = thread.active_model || "模型未指定";
-  const levelText = level ? levelLabel(level) : "默认档位";
-  if (changes) {
-    return `+${changes.additions} -${changes.deletions}`;
-  }
-  if (status.className === "running") return `${model} · ${levelText}`;
-  if (status.className === "error") return "打开活动查看原因";
-  if (status.label === "已停止") return "可以继续输入";
-  const updated = thread.updated_at ? ` · 更新于 ${formatRelativeTime(thread.updated_at)}` : "";
-  return `${model}${updated}`;
-}
-
-function taskProgressText(thread: Thread | null, status: Status, visibleEventCount: number) {
-  if (!thread) return "发送第一条消息后会创建任务";
-  if (status.className === "running") return "正在执行，新的回复和变更会自动同步";
-  if (status.className === "error") return "需要处理最近一次运行结果";
-  if (status.label === "已停止") return "已接管，可以继续输入下一步";
-  if (visibleEventCount) return `${visibleEventCount} 条进展已整理`;
-  return "等待下一次提交";
-}
-
-function runtimeSummary(config: RemoteConfig | null, state: ReturnType<typeof connectionState>) {
-  if (!config) return "等待远程服务提供入口";
-  if (state.className === "done") return "浏览器会话已连接到远程服务";
-  if (state.className === "running") return "正在同步远程服务状态";
-  if (state.className === "error") return "连接中断，页面会保留本地缓存";
-  return "远程入口已准备";
-}
-
-function threadMetaItems(project: ProjectInfo | null, thread: Thread | null, level: string) {
-  const items: Array<{ kind: string; label: string; icon?: React.ReactNode }> = [];
-  items.push({ kind: "workspace", label: project?.name || "工作区", icon: <Folder size={13} /> });
-  if (thread?.active_model) items.push({ kind: "model", label: thread.active_model });
-  if (level) items.push({ kind: "level", label: levelLabel(level) });
-  if (thread?.turn_count) items.push({ kind: "turns", label: `${thread.turn_count} 轮` });
-  if (!thread && level) return items;
-  if (!thread) items.push({ kind: "draft", label: "新任务" });
-  return items.slice(0, 4);
-}
-
-function composerTitle(thread: Thread | null, status: Status) {
-  if (!thread) return "新任务";
-  if (status.className === "running") return "任务运行中";
-  if (status.className === "error") return "继续修复";
-  return "继续这条任务线";
-}
-
-function composerFocusDetail(thread: Thread | null, level: string, conflict: string) {
-  if (!thread) return "发送后创建线程";
-  const pieces = [
-    thread.active_model || "",
-    level ? levelLabel(level) : "",
-    conflictLabel(conflict),
-  ].filter(Boolean);
-  return pieces.join(" · ") || "准备继续";
-}
-
-function composerHint(thread: Thread | null, status: Status, attachments: number) {
-  if (attachments) return `${attachments} 个素材会随本轮发送`;
-  if (!thread) return "发送后会创建线程";
-  if (status.className === "running") return "可以排队、询问或接管";
-  if (thread.updated_at) return `上次更新 ${formatRelativeTime(thread.updated_at)}`;
-  return "输入下一步指令";
-}
-
-function composerStateLabel(status: Status, hasDraft: boolean) {
-  if (status.className === "running") return "运行中";
-  if (hasDraft) return "有草稿";
-  if (status.className === "error") return "待处理";
-  return "就绪";
-}
-
-function composerPlaceholder(thread: Thread | null, attachments: number) {
-  if (attachments) return "描述这批素材的处理方式";
-  if (!thread) return "初始化任务";
-  return "提出后续修改要求";
-}
-
-function foldLabel(item: DisplayMessage) {
-  if (item.role === "reasoning") return "分析";
-  if (item.role === "tool") return "执行";
-  if (item.role === "error") return "需要处理";
-  return item.label;
-}
-
-function shouldFoldText(text: string, maxChars = 520, maxLines = 8) {
-  return text.length > maxChars || text.split(/\r?\n/).length > maxLines;
-}
-
-function textPreview(text: string, max = 120) {
-  const value = text.replace(/\s+/g, " ").trim();
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}
-
-function previewText(text: string, max = 120) {
-  return textPreview(stripMarkdownMarkers(text), max);
-}
-
-function stripMarkdownMarkers(text: string) {
-  return text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*]\s+/gm, "")
-    .replace(/^\s*\d+[.)]\s+/gm, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1");
-}
-
-function messageActions(role: string, text: string, copyText: (text: string) => Promise<void>, edit?: (text: string) => void, fork?: (text: string) => void) {
-  const buttons = [];
-  if (role === "user" && edit) buttons.push(<ActionButton key="edit" title="编辑" symbol="✎" onClick={() => edit(text)} icon={<Pencil />} />);
-  buttons.push(<ActionButton key="copy" title="复制" symbol="⎘" onClick={() => void copyText(text)} icon={<Copy />} />);
-  if (role === "assistant") {
-    if (fork) buttons.push(<ActionButton key="fork" title="分支" symbol="↳" onClick={() => fork(text)} icon={<GitFork />} />);
-  }
-  return buttons;
+}function messageActions(text: string, copyText: (text: string) => Promise<void>) {
+  return [<ActionButton key="copy" title="复制" symbol="⎘" onClick={() => void copyText(text)} icon={<Copy />} />];
 }
 
 function ActionButton({ title, symbol, icon, onClick }: { title: string; symbol: string; icon: React.ReactNode; onClick: () => void }) {
@@ -2042,592 +1608,6 @@ function ActionButton({ title, symbol, icon, onClick }: { title: string; symbol:
   );
 }
 
-function ChangeRow({ summary, openEvents, undo }: { summary: ChangeSummary; openEvents: () => void; undo: (summary: ChangeSummary) => void }) {
-  const fileText = summary.filesCount ? `${summary.filesCount} 个文件已更改` : "文件已更改";
-  return (
-    <div className="event-row change">
-      <div className="change-card">
-        <button className="change-main" type="button" onClick={openEvents}>
-          <span className="change-icon">›</span>
-          <span className="change-title">{fileText}</span>
-          <span className="change-stat add">+{summary.additions}</span>
-          <span className="change-stat del">-{summary.deletions}</span>
-        </button>
-        {!!summary.files.length && <div className="change-files">{summary.files.slice(0, 3).join(" · ")}</div>}
-        <button className="change-detail" type="button" onClick={() => undo(summary)}>撤销</button>
-      </div>
-    </div>
-  );
-}
-
-function InfoPane(props: {
-  thread: Thread | null;
-  project: ProjectInfo | null;
-  config: RemoteConfig | null;
-  capabilities: RemoteCapabilities | null;
-  events: TimelineEvent[];
-  attachments: AttachmentDraft[];
-  infoTab: InfoTab;
-  setInfoTab: (tab: InfoTab) => void;
-  eventFilter: EventFilter;
-  setEventFilter: (filter: EventFilter) => void;
-  close: () => void;
-  cancelSelectedThread: () => Promise<void>;
-  db: IDBDatabase | null;
-  lastSeq: number;
-  connection: string;
-  runningCount: number;
-  status: Status;
-  changes: ChangeSummary | null;
-}) {
-  const paneTitle = props.thread?.title || props.project?.name || "远程工作区";
-  const paneMeta = props.thread?.updated_at ? `更新于 ${formatRelativeTime(props.thread.updated_at)}` : props.project?.path || "选择任务后查看上下文";
-  return (
-    <aside className="info-pane">
-      <header className="info-head">
-        <IconButton title="关闭" className="drawer-close" onClick={props.close}><ChevronLeft /></IconButton>
-        <div>
-          <h2>工作台</h2>
-          <p title={paneTitle}>{paneTitle} · {paneMeta}</p>
-        </div>
-        <div className="info-head-tools">
-          <span className={clsx("info-head-state", props.status.className)}>{props.status.label}</span>
-          {props.status.className === "running" && (
-            <IconButton title="停止当前运行" className="info-stop" onClick={() => void props.cancelSelectedThread()}><CircleStop /></IconButton>
-          )}
-        </div>
-      </header>
-      <Tabs.Root className="info-tabs-root" value={props.infoTab} onValueChange={(value) => props.setInfoTab(value as InfoTab)}>
-        <Tabs.List className="info-tabs" aria-label="工作台信息">
-          {[
-            ["overview", "上下文"],
-            ["events", "活动"],
-            ["attachments", "素材"],
-            ["status", "运行"],
-          ].map(([tab, label]) => (
-            <Tabs.Trigger key={tab} className="info-tab" value={tab}>{label}</Tabs.Trigger>
-          ))}
-        </Tabs.List>
-        <Tabs.Content className="info-content" value="overview">
-          <OverviewPanel {...props} />
-        </Tabs.Content>
-        <Tabs.Content className="info-content" value="events">
-          <EventsPanel events={props.events} eventFilter={props.eventFilter} setEventFilter={props.setEventFilter} />
-        </Tabs.Content>
-        <Tabs.Content className="info-content" value="attachments">
-          <AttachmentsPanel events={props.events} attachments={props.attachments} />
-        </Tabs.Content>
-        <Tabs.Content className="info-content" value="status">
-          <StatusPanel {...props} />
-        </Tabs.Content>
-      </Tabs.Root>
-    </aside>
-  );
-}
-
-function OverviewPanel({ project, thread, events, attachments, status, changes, connection, setInfoTab, cancelSelectedThread }: React.ComponentProps<typeof InfoPane>) {
-  const productEvents = events.filter(isProductEvent);
-  const attachmentCount = attachmentEvents(events).length + attachments.length;
-  const visibleEventCount = productEvents.length;
-  const digest = activityDigest(productEvents);
-  const latest = productEvents.length ? activityEntryForEvent(productEvents[productEvents.length - 1], productEvents.length - 1) : null;
-  const taskText = thread?.last_text ? compactText(thread.last_text, 150) : status.className === "running" ? "任务正在执行，新的结果会自动追加到详情页。" : "还没有提交内容，可以从底部输入框开始新的任务。";
-  const updateText = thread?.updated_at ? formatRelativeTime(thread.updated_at) : "等待活动";
-  const modelText = [thread?.active_model || "默认模型", thread?.active_level ? levelLabel(thread.active_level) : ""].filter(Boolean).join(" · ");
-  const change = changes || digest.changes;
-  const changeText = change ? changeSummaryText(change) : "暂无文件变更";
-  const materialText = attachmentCount ? `${attachmentCount} 个素材已绑定` : "输入框上传后自动绑定";
-  const progressText = taskProgressText(thread, status, visibleEventCount);
-  const connectionText = connectionState(connection).label;
-  return (
-    <>
-      <section className="task-brief workbench-brief">
-        <div className="task-brief-head">
-          <span className="task-kicker">当前焦点</span>
-          <span className={clsx("task-status-chip", status.className)}>{status.label}</span>
-        </div>
-        <strong className="task-title">{thread?.title || project?.name || "新任务"}</strong>
-        <p className="task-body">{taskText}</p>
-        <div className="task-focus-list" aria-label="任务焦点">
-          <TaskFocusItem icon={<Activity />} title="任务进度" body={progressText} state={status.className} />
-          <TaskFocusItem icon={<Paperclip />} title="素材上下文" body={materialText} state={attachmentCount ? "done" : "muted"} />
-          <TaskFocusItem icon={<GitFork />} title="文件变化" body={changeText} state={change ? "done" : "muted"} />
-        </div>
-        <div className="workbench-actions info-actions" aria-label="工作台操作">
-          <WorkbenchAction icon={<Activity />} label="看活动" meta={visibleEventCount ? `${visibleEventCount} 条` : "暂无"} onClick={() => setInfoTab("events")} />
-          <WorkbenchAction icon={<UploadCloud />} label="素材" meta={attachmentCount ? `${attachmentCount} 个` : "待上传"} onClick={() => setInfoTab("attachments")} />
-          <WorkbenchAction icon={<ShieldCheck />} label="运行" meta={connectionText} onClick={() => setInfoTab("status")} state={status.className} />
-          {status.className === "running" && (
-            <WorkbenchAction icon={<CircleStop />} label="停止" meta="当前任务" onClick={() => void cancelSelectedThread()} state="error" />
-          )}
-        </div>
-      </section>
-      <section className="workbench-card">
-        <header className="workbench-card-head">
-          <span>上下文</span>
-          <strong>任务环境</strong>
-        </header>
-        <div className="workbench-row-list">
-          <WorkbenchRow icon={<Folder />} label={project?.name || "当前工作区"} value={project?.path || "等待同步项目路径"} detail={updateText} />
-          <WorkbenchRow icon={<Sparkles />} label="模型" value={modelText} detail={thread?.active_level ? "沿用当前任务配置" : "发送时使用默认档位"} />
-          <WorkbenchRow icon={<Activity />} label="任务进展" value={progressText} detail={latest?.meta || updateText} tone={status.className} />
-          <WorkbenchRow icon={<Paperclip />} label="素材绑定" value={materialText} detail={attachmentCount ? "图片进入上下文，文件作为引用" : "支持图片和文件"} tone={attachmentCount ? "done" : "muted"} />
-          <WorkbenchRow icon={<GitFork />} label="文件变更" value={changeText} detail={change ? "可在进展里回看" : "运行后自动整理"} tone={change ? "done" : "muted"} />
-        </div>
-      </section>
-      {latest && (
-        <section className="latest-activity">
-          <span>最近活动</span>
-          <strong>{latest.title}</strong>
-          <small>{latest.body || latest.meta}</small>
-        </section>
-      )}
-    </>
-  );
-}
-
-function EventsPanel({ events, eventFilter, setEventFilter }: { events: TimelineEvent[]; eventFilter: EventFilter; setEventFilter: (filter: EventFilter) => void }) {
-  const productEvents = events.filter(isProductEvent);
-  const digest = activityDigest(productEvents);
-  const filtered = eventFilter === "all" ? productEvents : productEvents.filter((event) => eventCategory(event) === eventFilter);
-  const entries = filtered.slice(-24).reverse().map(activityEntryForEvent);
-  return (
-    <>
-      <section className="activity-hero">
-        <span>活动</span>
-        <strong>{activityDigestTitle(digest)}</strong>
-        <p>{activityDigestBody(digest)}</p>
-      </section>
-      <ActivitySnapshot digest={digest} />
-      <div className="event-filter-bar">
-        {[
-          ["all", "全部"],
-          ["message", "对话"],
-          ["tool", "执行"],
-          ["attachment", "素材"],
-          ["system", "运行"],
-        ].map(([value, label]) => (
-          <button key={value} type="button" className={clsx("event-filter", eventFilter === value && "active")} onClick={() => setEventFilter(value as EventFilter)}>{label}</button>
-        ))}
-      </div>
-      <div className="activity-list">
-        {entries.length ? (
-          entries.map((entry) => <ActivityItem key={entry.key} entry={entry} />)
-        ) : (
-          <SideItem title="暂无记录" body={eventFilter === "all" ? "当前任务还没有活动" : "当前筛选没有活动"} />
-        )}
-      </div>
-    </>
-  );
-}
-
-function AttachmentsPanel({ events, attachments }: { events: TimelineEvent[]; attachments: AttachmentDraft[] }) {
-  const items = materialEntries(events, attachments);
-  const pendingItems = items.filter((item) => item.pending);
-  const committedItems = items.filter((item) => !item.pending);
-  const imageCount = items.filter((item) => item.kind === "image").length;
-  const fileCount = items.length - imageCount;
-  return (
-    <>
-      <section className="material-summary">
-        <span>素材</span>
-        <strong>{items.length ? `${items.length} 个素材` : "暂无素材"}</strong>
-        <p>{items.length ? materialSummaryText(pendingItems.length, committedItems.length, imageCount, fileCount) : "素材会在发送时上传；输入框 token 决定是否随本轮提交。"}</p>
-        {items.length > 0 && (
-          <div className="material-stat-grid" aria-label="素材摘要">
-            <MaterialStat label="待发送" value={pendingItems.length} />
-            <MaterialStat label="已提交" value={committedItems.length} />
-            <MaterialStat label="图片" value={imageCount} />
-            <MaterialStat label="文件" value={fileCount} />
-          </div>
-        )}
-      </section>
-      {items.length ? (
-        <div className="material-board">
-          <MaterialGroup title="待发送" body="这些素材保存在浏览器本地，点击发送时才会上传。" items={pendingItems} empty="没有等待发送的素材" />
-          <MaterialGroup title="已提交" body="这些素材已经随任务同步，可用于回看输入。" items={committedItems} empty="还没有已提交素材" />
-          <MaterialGuide />
-        </div>
-      ) : (
-        <div className="material-list">
-          <SideItem title="暂无素材" body="当前线程还没有附件" />
-        </div>
-      )}
-    </>
-  );
-}
-
-function StatusPanel({ config, capabilities, project, connection, runningCount }: React.ComponentProps<typeof InfoPane>) {
-  const limits = capabilities?.limits || {};
-  const features = capabilities?.tui_features || [];
-  const state = connectionState(connection);
-  const authLabel = config?.auth_mode === "none" ? "外部鉴权" : "验证码保护";
-  const authHint = config?.auth_mode === "none" ? "端口访问保护由用户环境负责" : "浏览器会话已通过验证码进入";
-  const uploadText = uploadLimitText(limits);
-  const levels = capabilities?.core?.models?.levels || [];
-  const pickers = capabilities?.core?.pickers || {};
-  const contextSources = pickerTotal(pickers.mcp) + pickerTotal(pickers.skills);
-  const modelLabel = levels.length ? `${levels.length} 个档位` : capabilities?.core?.agent_api ? "等待模型配置" : "等待能力摘要";
-  return (
-    <>
-      <section className="env-hero">
-        <div className="env-hero-main">
-          <span className={clsx("env-pulse", state.className)}><Radio /></span>
-          <span className="env-hero-copy">
-            <span>运行入口</span>
-            <strong>{project?.name || "uv-agent"}</strong>
-            <small>{runtimeSummary(config, state)}</small>
-          </span>
-          <span className={clsx("env-state-pill", state.className)}>{state.label}</span>
-        </div>
-        <div className="env-signal-grid">
-          <EnvironmentSignal label="保护" value={authLabel} hint={authHint} state={config?.auth_mode === "none" ? "muted" : "done"} />
-          <EnvironmentSignal label="队列" value={runningCount ? `${runningCount} 个运行中` : "空闲"} hint={runningCount ? "可在进展里跟进" : "可以提交新任务"} state={runningCount ? "running" : "done"} />
-          <EnvironmentSignal label="模型" value={modelLabel} hint={levels.length ? "输入框可直接切换" : "使用默认档位提交"} state={levels.length ? "done" : "muted"} />
-          <EnvironmentSignal label="提交" value={uploadText} hint="消息与附件会在发送时校验" state="done" />
-          <EnvironmentSignal label="上下文" value={contextSources ? `${contextSources} 个入口` : "未索引"} hint="输入框 @ 菜单可插入" state={contextSources ? "done" : "muted"} />
-        </div>
-      </section>
-      <EnvironmentStack capabilities={capabilities} />
-      <CapabilityDock features={features} />
-      <div className="connection-note">
-        <span>{project?.name || "uv-agent"}</span>
-        <strong>{project?.path || config?.url || "远程入口"}</strong>
-        <small>{state.hint}</small>
-      </div>
-    </>
-  );
-}
-
-function EnvironmentSignal({ label, value, hint, state }: { label: string; value: string; hint: string; state: Status["className"] }) {
-  return (
-    <span className={clsx("env-signal", state)}>
-      <small>{label}</small>
-      <strong>{value}</strong>
-      <em>{hint}</em>
-    </span>
-  );
-}
-
-function EnvironmentStack({ capabilities }: { capabilities: RemoteCapabilities | null }) {
-  const core = capabilities?.core;
-  const levels = core?.models?.levels || [];
-  const pickers = core?.pickers || {};
-  return (
-    <div className="environment-stack">
-      <section className="env-card">
-        <header className="env-card-head">
-          <span>
-            <Sparkles size={15} />
-            模型
-          </span>
-          <strong>{levels.length ? `${levels.length} 个可选` : core?.agent_api ? "暂无档位" : "等待接入"}</strong>
-        </header>
-        <div className="env-row-list">
-          {levels.length ? levels.slice(0, 5).map((level) => <ModelLevelRow key={level.id || level.model || "level"} level={level} defaultLevel={core?.models?.default_level || ""} />) : (
-                <EnvironmentEmpty title={core?.agent_api ? "还没有可展示模型" : "能力摘要未接入"} body={core?.agent_api ? "检查配置里的 public levels" : "升级后会显示模型、provider 和上下文窗口"} />
-          )}
-        </div>
-      </section>
-      <section className="env-card">
-        <header className="env-card-head">
-          <span>
-            <Workflow size={15} />
-            上下文入口
-          </span>
-          <strong>{toolIndexSummary(pickers)}</strong>
-        </header>
-        <div className="tool-index">
-          <PickerBlock title="MCP" picker={pickers.mcp} empty="没有声明 MCP server" />
-          <PickerBlock title="Skills" picker={pickers.skills} empty="没有发现可插入 skill" />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function ModelLevelRow({ level, defaultLevel }: { level: ModelLevelSummary; defaultLevel: string }) {
-  const id = String(level.id || "");
-  const model = String(level.model || level.model_name || "");
-  const provider = String(level.provider || "");
-  const tags = [
-    id === defaultLevel ? "默认" : "",
-    level.supports_images ? "图像" : "",
-    level.context_window_tokens ? `${Math.round(level.context_window_tokens / 1000)}k` : "",
-  ].filter(Boolean);
-  return (
-    <div className={clsx("env-row", level.status === "error" && "error")}>
-      <span className="env-row-icon"><Sparkles size={15} /></span>
-      <span className="env-row-main">
-        <strong>{levelLabel(id)}</strong>
-        <small>{[model, provider].filter(Boolean).join(" · ") || "模型配置待同步"}</small>
-      </span>
-      <span className="env-row-tags">
-        {tags.length ? tags.map((tag) => <em key={tag}>{tag}</em>) : <em>{level.provider_configured ? "可用" : "待确认"}</em>}
-      </span>
-    </div>
-  );
-}
-
-function PickerBlock({ title, picker, empty }: { title: string; picker?: PickerSummary; empty: string }) {
-  const items = picker?.items || [];
-  const count = Number(picker?.total || items.length || 0);
-  return (
-    <div className={clsx("picker-block", !picker?.available && "muted")}>
-      <div className="picker-block-head">
-        <strong>{title}</strong>
-        <small>{picker?.available ? `${count} 个条目` : "未启用"}</small>
-      </div>
-      <div className="picker-items">
-        {picker?.available && items.length ? items.slice(0, 4).map((item) => (
-          <span className="picker-item" key={item.id || item.value || item.description}>
-            <strong>{pickerItemTitle(item)}</strong>
-            <small>{item.description || item.meta || item.value}</small>
-          </span>
-        )) : (
-          <EnvironmentEmpty title={picker?.available ? empty : `${title} 插入源未注册`} body={picker?.available ? "可以继续正常提交任务" : "启用对应内置插件后会出现在这里"} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function EnvironmentEmpty({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="env-empty">
-      <strong>{title}</strong>
-      <small>{body}</small>
-    </div>
-  );
-}
-
-function CapabilityDock({ features }: { features: CapabilityFeature[] }) {
-  const rows = features.map(capabilityRow);
-  if (!rows.length) return null;
-  const stats = capabilityStats(features);
-  const readyPercent = stats.total ? Math.round((stats.ready / stats.total) * 100) : 0;
-  const highlights = rows
-    .filter((row) => row.stateClass !== "muted")
-    .concat(rows.filter((row) => row.stateClass === "muted"))
-    .slice(0, 7);
-  return (
-    <section className="capability-board" aria-label="可用能力">
-      <header className="capability-board-head">
-        <span>可用能力</span>
-        <strong>{stats.ready}/{stats.total} 可用</strong>
-      </header>
-      <div className="capability-meter" aria-hidden="true">
-        <span style={{ width: `${readyPercent}%` }} />
-      </div>
-      <p className="capability-summary">{capabilitySummary(features)}</p>
-      <div className="capability-chip-list">
-        {highlights.map((row) => (
-          <span className={clsx("capability-chip", row.stateClass)} key={row.key} title={row.detail}>
-            {capabilityIcon(row.key)}
-            <strong>{row.label}</strong>
-          </span>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function capabilityIcon(id: string) {
-  if (id === "attachments") return <Paperclip size={13} />;
-  if (id === "transcript") return <Activity size={13} />;
-  if (id === "interrupt") return <CircleStop size={13} />;
-  if (id === "status" || id === "config") return <Settings size={13} />;
-  return <Sparkles size={13} />;
-}
-
-function StatusMini({ icon, label, value, hint = "" }: { icon: React.ReactNode; label: string; value: string; hint?: string }) {
-  return (
-    <div className="status-mini">
-      <span className="status-mini-icon">{icon}</span>
-      <span className="status-mini-main">
-        <span>{label}</span>
-        <strong>{value || "-"}</strong>
-        {hint && <small>{hint}</small>}
-      </span>
-    </div>
-  );
-}
-
-function pickerTotal(picker?: PickerSummary) {
-  if (!picker?.available) return 0;
-  return Number(picker.total || picker.items?.length || 0);
-}
-
-function capabilityStats(features: CapabilityFeature[]) {
-  const rows = features.map((feature) => capabilityStatus(feature.status));
-  return {
-    total: rows.length,
-    ready: rows.filter((row) => row.className === "done").length,
-    partial: rows.filter((row) => row.className === "running").length,
-    waiting: rows.filter((row) => row.className === "muted").length,
-    error: rows.filter((row) => row.className === "error").length,
-  };
-}
-
-function TaskFocusItem({ icon, title, body, state }: { icon: React.ReactNode; title: string; body: string; state?: string }) {
-  return (
-    <div className={clsx("task-focus-item", state)}>
-      <span className="task-focus-icon">{icon}</span>
-      <span className="task-focus-main">
-        <strong>{title}</strong>
-        <small>{body || "-"}</small>
-      </span>
-    </div>
-  );
-}
-
-function TaskMetric({ label, value, tone = "muted" }: { label: string; value: string; tone?: Status["className"] }) {
-  return (
-    <span className={clsx("task-metric", tone)}>
-      <small>{label}</small>
-      <strong>{value}</strong>
-    </span>
-  );
-}
-
-function WorkbenchRow({ icon, label, value, detail, tone = "muted" }: { icon: React.ReactNode; label: string; value: string; detail: string; tone?: Status["className"] }) {
-  return (
-    <div className={clsx("workbench-row", tone)}>
-      <span className="workbench-row-icon">{icon}</span>
-      <span className="workbench-row-main">
-        <small>{label}</small>
-        <strong title={value}>{value || "-"}</strong>
-        <em>{detail}</em>
-      </span>
-    </div>
-  );
-}
-
-function WorkbenchAction({ icon, label, meta, onClick, state = "muted" }: { icon: React.ReactNode; label: string; meta: string; onClick: () => void; state?: Status["className"] }) {
-  return (
-    <button type="button" className={clsx("workbench-action", state)} onClick={onClick}>
-      <span className="workbench-action-icon">{icon}</span>
-      <span className="workbench-action-main">
-        <strong>{label}</strong>
-        <small>{meta}</small>
-      </span>
-    </button>
-  );
-}
-
-function SideItem({ title, body, meta = "" }: { title: string; body: string; meta?: string }) {
-  return <div className="side-item"><strong>{title}</strong><span>{body || "-"}</span>{meta && <small>{meta}</small>}</div>;
-}
-
-function ActivitySnapshot({ digest }: { digest: ActivityDigest }) {
-  if (!digest.total) return null;
-  const stats = [
-    { label: "对话", value: digest.messages, className: "message" },
-    { label: "执行", value: digest.executions, className: "tool" },
-    { label: "素材", value: digest.materials, className: "attachment" },
-    { label: "运行", value: digest.contexts, className: "system" },
-  ];
-  const changedFiles = digest.changes?.files.slice(0, 4) || [];
-  return (
-    <section className="activity-snapshot" aria-label="活动摘要">
-      <div className="activity-stat-grid">
-        {stats.map((stat) => (
-          <span key={stat.label} className={clsx("activity-stat", stat.className)}>
-            <strong>{stat.value}</strong>
-            <small>{stat.label}</small>
-          </span>
-        ))}
-      </div>
-      {digest.changes && (
-        <div className="activity-change-card">
-          <span className="activity-change-main">
-            <strong>文件更改</strong>
-            <small>{changeSummaryText(digest.changes)}</small>
-          </span>
-          {changedFiles.length > 0 && (
-            <span className="activity-change-files">
-              {changedFiles.map((file) => <em key={file}>{file}</em>)}
-              {digest.changes.files.length > changedFiles.length && <em>+{digest.changes.files.length - changedFiles.length}</em>}
-            </span>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ActivityItem({ entry }: { entry: ActivityEntry }) {
-  return (
-    <div className={clsx("activity-item", entry.category)}>
-      <span className="activity-dot" />
-      <span className="activity-main">
-        <strong>{entry.title}</strong>
-        <span>{entry.body || "-"}</span>
-      </span>
-      {entry.meta && <small>{entry.meta}</small>}
-    </div>
-  );
-}
-
-function MaterialStat({ label, value }: { label: string; value: number }) {
-  return (
-    <span className="material-stat">
-      <strong>{value}</strong>
-      <small>{label}</small>
-    </span>
-  );
-}
-
-function MaterialGroup({ title, body, items, empty }: { title: string; body: string; items: MaterialEntry[]; empty: string }) {
-  return (
-    <section className="material-section">
-      <div className="material-section-head">
-        <span>
-          <strong>{title}</strong>
-          <small>{body}</small>
-        </span>
-        <em>{items.length}</em>
-      </div>
-      <div className="material-list">
-        {items.length ? items.map((item) => <MaterialItem key={item.key} item={item} />) : <SideItem title={empty} body="素材会跟随输入框 token 自动联动。" />}
-      </div>
-    </section>
-  );
-}
-
-function MaterialGuide() {
-  return (
-    <section className="material-guide" aria-label="素材规则">
-      <div className="material-guide-head">
-        <Paperclip />
-        <span>
-          <strong>提交规则</strong>
-          <small>删除输入框 token 会同步移除附件，发送时再校验和上传。</small>
-        </span>
-      </div>
-      <div className="material-rule-list">
-        <span className="material-rule image"><ImageIcon /><small>图片使用 [Image #] token，并直接进入模型上下文。</small></span>
-        <span className="material-rule file"><FilePlus2 /><small>文件以名称和引用进入任务说明，便于后续处理。</small></span>
-      </div>
-    </section>
-  );
-}
-
-function MaterialItem({ item }: { item: MaterialEntry }) {
-  return (
-    <div className={clsx("material-item", item.kind, item.pending && "pending")}>
-      <span className="material-icon">{item.kind === "image" ? <ImageIcon /> : <FilePlus2 />}</span>
-      <span className="material-main">
-        <strong>{item.name || item.token || "素材"}</strong>
-        <span className="material-context">{item.context}</span>
-        <span className="material-token">{item.token || item.hint}</span>
-        {item.hint && <small>{item.hint}</small>}
-      </span>
-      <em>{item.state}</em>
-    </div>
-  );
-}
-
 function CommandPalette({
   open,
   query,
@@ -2635,8 +1615,6 @@ function CommandPalette({
   close,
   threads,
   currentThread,
-  status,
-  changes,
   composerText,
   attachmentCount,
   startNewThread,
@@ -2645,9 +1623,7 @@ function CommandPalette({
   setComposerText,
   focusComposer,
   clearComposer,
-  cancelSelectedThread,
   startEditingTitle,
-  prepareChangeUndo,
 }: {
   open: boolean;
   query: string;
@@ -2655,8 +1631,6 @@ function CommandPalette({
   close: () => void;
   threads: Thread[];
   currentThread: Thread | null;
-  status: Status;
-  changes: ChangeSummary | null;
   composerText: string;
   attachmentCount: number;
   startNewThread: () => void;
@@ -2665,9 +1639,7 @@ function CommandPalette({
   setComposerText: (value: string) => void;
   focusComposer: () => void;
   clearComposer: () => void;
-  cancelSelectedThread: () => void;
   startEditingTitle: () => void;
-  prepareChangeUndo: (summary: ChangeSummary) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -2686,8 +1658,6 @@ function CommandPalette({
         { title: "新建任务", meta: "Ctrl+N", keywords: "new thread 新建", action: () => run(startNewThread) },
         { title: currentThread ? "继续输入" : "打开输入框", meta: currentThread ? currentTitle : "草稿", keywords: "composer input 输入", action: () => run(focusComposer) },
         composerText || attachmentCount ? { title: "清空输入", meta: attachmentCount ? `${attachmentCount} 个素材` : "草稿", keywords: "clear composer 清空", action: () => run(clearComposer) } : null,
-        status.className === "running" ? { title: "停止当前运行", meta: currentTitle, keywords: "cancel stop interrupt 停止 中断", action: () => run(cancelSelectedThread) } : null,
-        changes ? { title: "生成撤销草稿", meta: `${changes.filesCount || changes.files.length} 个文件`, keywords: "undo revert 撤销", action: () => run(() => prepareChangeUndo(changes)) } : null,
       ],
     },
     {
@@ -2975,6 +1945,13 @@ function CommandButton({ icon, label, meta, onClick }: { icon: React.ReactNode; 
   );
 }
 
+function capabilityIcon(id: string) {
+  if (id === "attachments") return <Paperclip size={13} />;
+  if (id === "transcript") return <Activity size={13} />;
+  if (id === "status") return <Settings size={13} />;
+  return <Sparkles size={13} />;
+}
+
 function CapabilityMenu({ capabilities, openStatus }: { capabilities: RemoteCapabilities | null; openStatus: () => void }) {
   const rows = capabilities?.tui_features?.map(capabilityRow) || [];
   const available = rows.filter((row) => row.stateClass !== "muted").length;
@@ -3015,631 +1992,9 @@ function CapabilityMenu({ capabilities, openStatus }: { capabilities: RemoteCapa
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   );
-}
-
-type ChangeSummary = {
-  files: string[];
-  filesCount: number;
-  additions: number;
-  deletions: number;
-};
-
-type ActivityDigest = {
-  total: number;
-  messages: number;
-  executions: number;
-  materials: number;
-  contexts: number;
-  changes: ChangeSummary | null;
-};
-
-type ActivityEntry = {
-  key: string;
-  category: EventFilter | "change";
-  title: string;
-  body: string;
-  meta: string;
-};
-
-type MaterialEntry = {
-  key: string;
-  kind: "image" | "file";
-  name: string;
-  token: string;
-  state: "待发送" | "已提交";
-  context: string;
-  hint: string;
-  pending: boolean;
-};
-
-async function api<T = Json>(path: string, options: { method?: string; body?: unknown; form?: FormData; auth?: boolean } = {}): Promise<T> {
-  const init: RequestInit = { method: options.method || "GET", credentials: "same-origin", headers: {} };
-  if (options.form) {
-    init.body = options.form;
-  } else if (options.body !== undefined) {
-    (init.headers as Record<string, string>)["Content-Type"] = "application/json";
-    init.body = JSON.stringify(options.body);
-  }
-  const response = await fetch(path, init);
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!response.ok || data.ok === false) throw new Error(data.error || data.reason || response.statusText);
-  return data as T;
-}
-
-function useLocalString(key: string, fallback: string) {
-  const [value, setValue] = useState(() => localStorage.getItem(key) || fallback);
-  const save = (next: string) => {
-    setValue(next);
-    localStorage.setItem(key, next);
-  };
-  return [value, save] as const;
-}
-
-function useLocalNumber(key: string, fallback: number) {
-  const [value, setValue] = useState(() => Number(localStorage.getItem(key) || String(fallback)));
-  const save = (next: number) => {
-    setValue(next);
-    localStorage.setItem(key, String(next));
-  };
-  return [value, save] as const;
-}
-
-function useMedia(query: string) {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const listener = () => setMatches(media.matches);
-    listener();
-    media.addEventListener("change", listener);
-    return () => media.removeEventListener("change", listener);
-  }, [query]);
-  return matches;
-}
-
-function mergeEventsMap(previous: Map<string, TimelineEvent[]>, threadId: string, events: TimelineEvent[]) {
-  if (!events.length) return previous;
-  const next = new Map(previous);
-  const byId = new Map((next.get(threadId) || []).map((event) => [event._event_id, event]));
-  for (const event of events) byId.set(event._event_id, event);
-  next.set(threadId, [...byId.values()].sort((a, b) => Number(a._event_id || 0) - Number(b._event_id || 0)));
-  return next;
-}
-
-function isLiveTimelineEvent(event: TimelineEvent) {
-  return [
-    "tool.started",
-    "tool.partial",
-    "tool.output",
-    "model.stream_retry",
-    "judge.started",
-    "judge.completed",
-    "compaction.started",
-    "compaction.completed",
-    "assistant.reasoning_completed",
-    "assistant.message.completed",
-    "assistant.completed",
-    "response.output_text.done",
-    "item.assistant",
-    "turn.submitted",
-    "turn.started",
-    "turn.completed",
-    "turn.interrupted",
-    "turn.error",
-  ].includes(String(event.type || ""));
-}
-
-function normalizeThreadFilter(value: string): ThreadFilter {
-  return THREAD_FILTER_OPTIONS.some((option) => option.value === value) ? value as ThreadFilter : "all";
-}
-
-function countThreadsByFilter(threads: Thread[], eventsByThread: Map<string, TimelineEvent[]>, liveEvents: TimelineEvent[]): Record<ThreadFilter, number> {
-  const counts: Record<ThreadFilter, number> = { all: threads.length, running: 0, done: 0, attention: 0 };
-  for (const thread of threads) {
-    const status = statusForThread(thread, eventsByThread, liveEvents);
-    if (threadMatchesFilter(thread, status, "running")) counts.running += 1;
-    if (threadMatchesFilter(thread, status, "done")) counts.done += 1;
-    if (threadMatchesFilter(thread, status, "attention")) counts.attention += 1;
-  }
-  return counts;
-}
-
-function filterThreads(threads: Thread[], query: string, filter: ThreadFilter, eventsByThread: Map<string, TimelineEvent[]>, liveEvents: TimelineEvent[]) {
-  const value = query.toLowerCase();
-  return threads.filter((thread) => {
-    const haystack = `${thread.title || ""} ${thread.last_text || ""} ${thread.thread_id || ""}`.toLowerCase();
-    const status = statusForThread(thread, eventsByThread, liveEvents);
-    return (!value || haystack.includes(value)) && threadMatchesFilter(thread, status, filter);
-  });
-}
-
-function threadMatchesFilter(_thread: Thread, status: Status, filter: ThreadFilter) {
-  if (filter === "all") return true;
-  if (filter === "running") return status.className === "running";
-  if (filter === "done") return status.className === "done";
-  if (filter === "attention") return status.className === "error" || status.label === "已停止";
-  return true;
-}
-
-function compareThreads(a: Thread, b: Thread) {
-  return dateValue(b.updated_at) - dateValue(a.updated_at);
-}
-
-function projectUpdatedAt(threads: Thread[]) {
-  const latest = threads.reduce((max, thread) => Math.max(max, dateValue(thread.updated_at)), 0);
-  return latest ? new Date(latest).toISOString() : "";
-}
-
-function statusForThread(thread: Thread | null, eventsByThread: Map<string, TimelineEvent[]>, liveEvents: TimelineEvent[]): Status {
-  if (!thread) return { label: "草稿", className: "muted" };
-  const liveTerminal = liveEvents
-    .filter((event) => event.thread_id === thread.thread_id && ["turn.started", "turn.completed", "turn.interrupted", "turn.error"].includes(String(event.type || "")))
-    .at(-1);
-  if (liveTerminal?.type === "turn.started") return { label: "运行中", className: "running" };
-  if (liveTerminal?.type === "turn.error") return { label: "失败", className: "error" };
-  if (liveTerminal?.type === "turn.interrupted") return { label: "已停止", className: "muted" };
-  if (liveTerminal?.type === "turn.completed") return { label: "已完成", className: "done" };
-  const rawStatus = String(thread.status || "").toLowerCase();
-  if (["running", "in_progress", "active"].includes(rawStatus)) return { label: "运行中", className: "running" };
-  if (["failed", "failure", "error"].includes(rawStatus)) return { label: "失败", className: "error" };
-  if (["interrupted", "cancelled", "canceled", "stopped"].includes(rawStatus)) return { label: "已停止", className: "muted" };
-  if (["completed", "complete", "done", "merged"].includes(rawStatus)) return { label: "已完成", className: "done" };
-  const events = eventsByThread.get(thread.thread_id) || [];
-  const lastTerminal = [...events].reverse().find((event) => ["turn.completed", "turn.interrupted", "turn.error"].includes(String(event.type || "")));
-  if (lastTerminal?.type === "turn.error") return { label: "失败", className: "error" };
-  if (lastTerminal?.type === "turn.interrupted") return { label: "已停止", className: "muted" };
-  if (lastTerminal?.type === "turn.completed" || (thread.turn_count || 0) > 0) return { label: "已完成", className: "done" };
-  return { label: "就绪", className: "muted" };
-}
-
-function threadCardMeta(thread: Thread, events: TimelineEvent[], status: Status) {
-  const parts = [];
-  if (thread.active_model) parts.push(thread.active_model);
-  if (thread.active_level) parts.push(levelLabel(thread.active_level));
-  if (thread.turn_count) parts.push(`${thread.turn_count} 轮`);
-  const changes = summarizeThreadChanges(events);
-  if (changes) parts.push(`${changes.filesCount || changes.files.length} 文件`);
-  if (!parts.length && thread.last_text) parts.push(thread.last_text);
-  if (!parts.length) parts.push(status.label);
-  return parts.join(" · ");
-}
-
-function activityDigest(events: TimelineEvent[]): ActivityDigest {
-  let messages = 0;
-  let executions = 0;
-  let materials = 0;
-  let contexts = 0;
-  for (const event of events) {
-    const category = eventCategory(event);
-    if (category === "message") messages += 1;
-    else if (category === "tool") executions += 1;
-    else if (category === "attachment") materials += 1;
-    else contexts += 1;
-  }
-  return {
-    total: events.length,
-    messages,
-    executions,
-    materials,
-    contexts,
-    changes: summarizeThreadChanges(events),
-  };
-}
-
-function activityDigestTitle(digest: ActivityDigest) {
-  if (!digest.total) return "等待任务活动";
-  if (digest.changes) return "已有文件更改";
-  if (digest.executions) return "执行步骤已同步";
-  if (digest.messages > 1) return "对话已更新";
-  return "任务已有记录";
-}
-
-function activityDigestBody(digest: ActivityDigest) {
-  if (!digest.total) return "提交消息后，这里会按时间整理消息、执行、素材和上下文活动。";
-  const parts = [`${digest.total} 条活动`];
-  if (digest.messages) parts.push(`${digest.messages} 条对话`);
-  if (digest.executions) parts.push(`${digest.executions} 次执行`);
-  if (digest.materials) parts.push(`${digest.materials} 个素材`);
-  if (digest.contexts) parts.push(`${digest.contexts} 条运行更新`);
-  if (digest.changes) parts.push(changeSummaryText(digest.changes));
-  return parts.join(" · ");
-}
-
-function materialSummaryText(pending: number, committed: number, images: number, files: number) {
-  const parts = [];
-  if (pending) parts.push(`${pending} 个待发送`);
-  if (committed) parts.push(`${committed} 个已提交`);
-  if (images) parts.push(`${images} 张图片`);
-  if (files) parts.push(`${files} 个文件`);
-  return parts.length ? `${parts.join(" · ")}。` : "素材会在发送时上传；输入框 token 是唯一绑定入口。";
-}
-
-function activityEntryForEvent(event: TimelineEvent, index: number): ActivityEntry {
-  const category = eventCategory(event);
-  const change = changeSummaryForEvent(event);
-  const key = String(event._event_id ?? `${event.type || "event"}-${event.created_at || event.timestamp || index}`);
-  if (change) {
-    const files = change.files.slice(0, 2).join("、");
-    const fileText = files ? `${files}${change.files.length > 2 ? " 等" : ""}` : "文件";
-    return {
-      key,
-      category: "change",
-      title: "文件更改",
-      body: `${fileText} · ${changeSummaryText(change)}`,
-      meta: eventTimeLabel(event),
-    };
-  }
-  if (category === "message") {
-    const isUser = isUserDisplayEvent(event);
-    const text = isUser ? userTextForEvent(event) : assistantTextForEvent(event);
-    return {
-      key,
-      category,
-      title: isUser ? "新的输入" : "回复已更新",
-      body: compactText(stripMarkdownMarkers(text), 140) || (isUser ? "用户提交了一轮任务" : "任务产出了新的回复"),
-      meta: eventTimeLabel(event),
-    };
-  }
-  if (category === "attachment") {
-    const token = event.attachment?.token || event.attachment?.canonical_token || "";
-    const filename = event.attachment?.filename || "";
-    return {
-      key,
-      category,
-      title: event.type === "item.image_attachment" ? "图片已加入" : "文件已加入",
-      body: filename || token || "素材已加入任务",
-      meta: token || eventTimeLabel(event),
-    };
-  }
-  if (category === "tool") {
-    const name = String(event.name || event.tool_name || "");
-    return {
-      key,
-      category,
-      title: "执行完成",
-      body: name ? `${name} 已返回结果` : "执行结果已同步到任务详情",
-      meta: eventTimeLabel(event),
-    };
-  }
-  return {
-    key,
-    category,
-    title: event.type === "turn.error" ? "运行失败" : "运行更新",
-    body: compactText(String(event.message || event.title || eventSummary(event) || ""), 140) || "上下文状态已更新",
-    meta: eventTimeLabel(event),
-  };
-}
-
-function materialEntries(events: TimelineEvent[], attachments: AttachmentDraft[]): MaterialEntry[] {
-  const pending = attachments.map((attachment) => ({
-    key: `draft-${attachment.id}`,
-    kind: attachment.kind,
-    name: attachment.filename,
-    token: attachment.token,
-    state: "待发送" as const,
-    context: attachment.kind === "image" ? "发送时进入模型上下文" : "发送时生成文件引用",
-    hint: attachment.mime_type || "发送时上传",
-    pending: true,
-  }));
-  const committed = attachmentEvents(events).map((item, index) => ({
-    key: `event-${item.token || item.filename || index}`,
-    kind: item.kind,
-    name: item.filename || item.token || "素材",
-    token: item.token,
-    state: "已提交" as const,
-    context: item.kind === "image" ? "图片内容已进入模型上下文" : "文件以引用形式进入任务说明",
-    hint: item.kind === "image" ? "模型可直接理解图片内容" : "提交时已生成引用",
-    pending: false,
-  }));
-  return [...pending, ...committed.reverse()];
-}
-
-function attachmentEvents(events: TimelineEvent[]): Array<{ kind: "image" | "file"; token: string; filename: string }> {
-  return events
-    .filter((event) => event.type === "item.image_attachment" || event.type === "item.file_attachment")
-    .map((event) => ({
-      kind: event.type === "item.image_attachment" ? "image" : "file",
-      token: event.attachment?.token || event.attachment?.canonical_token || "",
-      filename: event.attachment?.filename || "",
-    }));
-}
-
-function summarizeThreadChanges(events: TimelineEvent[]) {
-  const files = new Set<string>();
-  const seen = new Set<string>();
-  let additions = 0;
-  let deletions = 0;
-  for (const event of events) {
-    const summary = changeSummaryForEvent(event);
-    if (!summary) continue;
-    const signature = `${[...summary.files].sort().join("|")}::${summary.additions}::${summary.deletions}`;
-    if (seen.has(signature)) continue;
-    seen.add(signature);
-    additions += summary.additions;
-    deletions += summary.deletions;
-    for (const file of summary.files) files.add(file);
-  }
-  if (!files.size && additions === 0 && deletions === 0) return null;
-  return { files: [...files], filesCount: files.size, additions, deletions };
-}
-
-function changeSummaryText(summary: ChangeSummary) {
-  const fileText = summary.filesCount || summary.files.length ? `${summary.filesCount || summary.files.length} 个文件` : "文件已更新";
-  const statText = summary.additions || summary.deletions ? `+${summary.additions} -${summary.deletions}` : "内容已更新";
-  return `${fileText} · ${statText}`;
-}
-
-function changeSummaryForEvent(event: TimelineEvent): ChangeSummary | null {
-  const rawFiles = Array.isArray(event.files) ? event.files : Array.isArray(event.changed_files) ? event.changed_files : [];
-  const files = rawFiles.map((item) => (typeof item === "string" ? item : String((item as Json)?.path || (item as Json)?.file || (item as Json)?.name || ""))).filter(Boolean);
-  let additions = numberValue(event.additions ?? event.added ?? event.insertions);
-  let deletions = numberValue(event.deletions ?? event.deleted ?? event.removals);
-  const text = toolOutputText(event);
-  const stat = text.match(/\+(\d+)\s+-\s*(\d+)/);
-  if (stat) {
-    additions ||= Number(stat[1]);
-    deletions ||= Number(stat[2]);
-  }
-  const likelyChangeEvent = /(?:diff|patch|change|changed|apply_patch|file)/i.test(String(event.type || "")) || /(?:changed|modified|files? changed|已更改|修改)/i.test(text);
-  const hasChangeSignal = likelyChangeEvent || rawFiles.length > 0 || additions > 0 || deletions > 0 || Boolean(stat);
-  if (!hasChangeSignal) return null;
-  for (const file of extractChangedFiles(text)) {
-    if (!files.includes(file)) files.push(file);
-  }
-  if (!files.length && additions === 0 && deletions === 0) return null;
-  return { files, filesCount: files.length, additions, deletions };
-}
-
-function extractChangedFiles(text: string) {
-  const matches = new Set<string>();
-  const pattern = /(?:^|[\s"'`])([A-Za-z0-9_.\\/-]+\.(?:py|js|ts|tsx|jsx|css|html|md|json|toml|yaml|yml|lock|txt|rs|go|java|kt|swift|c|h|cpp|hpp|sql|sh|ps1))(?:\b|$)/gm;
-  for (const match of text.matchAll(pattern)) matches.add(match[1].replaceAll("\\", "/"));
-  return [...matches];
-}
-
-function numberValue(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function eventCategory(event: TimelineEvent): EventFilter {
-  if (event.type === "item.image_attachment" || event.type === "item.file_attachment") return "attachment";
-  if (isUserDisplayEvent(event) || isAssistantFinalEvent(event)) return "message";
-  if (event.type?.startsWith("tool.") || event.type === "item.tool_output") return "tool";
-  return "system";
-}
-
-function isProductEvent(event: TimelineEvent) {
-  return ![
-    "tool.started",
-    "tool.partial",
-    "model.stream_retry",
-    "response.output_text.delta",
-    "assistant.delta",
-    "assistant.message.delta",
-    "assistant.reasoning_delta",
-    "item.assistant_partial",
-    "item.reasoning_partial",
-    "compaction.started",
-    "compaction.completed",
-    "item.compaction",
-    "turn.started",
-    "turn.completed",
-    "turn.interrupted",
-  ].includes(String(event.type || ""));
-}
-
-function eventSummary(event: TimelineEvent) {
-  if (isUserDisplayEvent(event)) return userTextForEvent(event).slice(0, 160);
-  if (isAssistantFinalEvent(event)) return assistantTextForEvent(event).slice(0, 160);
-  if (event.type === "tool.started") return event.name || event.tool_name || "准备运行工具";
-  if (event.type === "tool.output" || event.type === "item.tool_output") return toolOutputText(event).slice(0, 160);
-  if (event.type === "item.image_attachment" || event.type === "item.file_attachment") return event.attachment?.filename || event.attachment?.token || event.attachment?.canonical_token || "附件";
-  if (event.type === "turn.started") return "运行中";
-  if (event.type === "turn.completed") return "已完成";
-  if (event.type === "turn.interrupted") return "已停止";
-  if (event.type === "compaction.started") return "正在整理上下文";
-  if (event.type === "compaction.completed" || event.type === "item.compaction") return "上下文已整理";
-  if (event.message) return String(event.message).slice(0, 160);
-  if (event.title) return String(event.title).slice(0, 160);
-  return formatRelativeTime(event.created_at || event.timestamp || "") || "";
-}
-
-function eventLabel(event: TimelineEvent) {
-  if (isUserDisplayEvent(event)) return "用户消息";
-  if (isAssistantFinalEvent(event)) return "回复已更新";
-  if (isReasoningEvent(event)) return "思考过程";
-  if (event.type === "tool.started") return "工具准备";
-  if (event.type === "tool.output" || event.type === "item.tool_output" || event.type === "tool.partial") return changeSummaryForEvent(event) ? "文件变更" : "执行结果";
-  if (event.type === "item.image_attachment" || event.type === "item.file_attachment") return "素材";
-  if (event.type?.startsWith("compaction.") || event.type === "item.compaction") return "上下文";
-  if (event.type === "turn.error") return "运行失败";
-  if (event.type?.startsWith("turn.")) return "运行状态";
-  if (event.type === "model.stream_retry") return "模型连接";
-  if (event.type?.startsWith("thread.")) return "线程更新";
-  return "活动";
-}
-
-function eventTimeLabel(event: TimelineEvent) {
-  const time = formatRelativeTime(event.created_at || event.timestamp || "");
-  return time;
-}
-
-function displayEventTime(event: TimelineEvent) {
-  return dateValue(event.created_at || event.timestamp || "");
-}
-
-function compactText(value: string, max = 160) {
-  const text = value.replace(/\s+/g, " ").trim();
-  if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
-}
-
-function itemText(item: unknown) {
-  const value = item as Json | undefined;
-  if (typeof value?.text === "string") return value.text;
-  if (typeof value?.content === "string") return value.content;
-  const content = Array.isArray(value?.content) ? value.content as Json[] : [];
-  return content.filter((part) => ["input_text", "output_text", "text", "refusal"].includes(String(part.type || ""))).map((part) => String(part.text || "")).join("\n");
-}
-
-function firstTextValue(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value;
-  }
-  return "";
-}
-
-function userTextForEvent(event: TimelineEvent) {
-  const payload = event.payload as Json | undefined;
-  const payloadItem = payload?.item as Json | undefined;
-  return firstTextValue(
-    event.text,
-    event.message,
-    event.prompt,
-    event.input,
-    payload?.text,
-    payload?.message,
-    payload?.input,
-    payload?.prompt,
-    itemText(event.item),
-    itemText(payloadItem),
-  ) || "已提交新的任务";
-}
-
-function assistantTextForEvent(event: TimelineEvent) {
-  if (event.type === "item.model_response") {
-    const output = (event.output || []) as Json[];
-    const text = modelOutputText(output) || String(event.text || event.message || "");
-    return [text, modelToolSummary(output)].filter(Boolean).join("\n\n");
-  }
-  const output = Array.isArray(event.output) ? modelOutputText(event.output as Json[]) : "";
-  const item = event.item as Json | undefined;
-  return String(event.text || event.message || event.delta || output || itemText(item) || "");
-}
-
-function assistantDeltaText(event: TimelineEvent) {
-  if (!isAssistantDeltaEvent(event)) return "";
-  return String(event.delta || event.text || event.message || "");
-}
-
-function modelOutputText(output: Json[]) {
-  const parts: string[] = [];
-  for (const item of output || []) {
-    if (["output_text", "text"].includes(String(item.type || "")) && item.text) {
-      parts.push(String(item.text));
-      continue;
-    }
-    if (item.type !== "message") continue;
-    for (const part of (Array.isArray(item.content) ? item.content as Json[] : [])) {
-      if (["output_text", "text"].includes(String(part.type || "")) && part.text) parts.push(String(part.text));
-    }
-  }
-  return parts.join("\n");
-}
-
-function modelToolSummary(output: Json[]) {
-  const calls = output.filter((item) => item.type === "function_call");
-  return calls.map((call) => `工具调用 · ${String(call.name || call.call_id || "run")}`).join("\n");
-}
-
-function toolOutputText(event: TimelineEvent) {
-  const item = event.item || {};
-  const raw = event.output ?? item.output ?? event.text ?? "";
-  if (typeof raw === "string") return raw.slice(0, 4000);
-  try {
-    return JSON.stringify(raw, null, 2).slice(0, 4000);
-  } catch {
-    return String(raw).slice(0, 4000);
-  }
-}
-
-function uniqueFileToken(filename: string, text: string, attachments: AttachmentDraft[]) {
-  const base = `[File ${filename}]`;
-  const existing = new Set(attachments.map((attachment) => attachment.token));
-  if (!existing.has(base) && countUnquotedToken(text, base) === 0) return base;
-  for (let index = 2; index < 1000; index += 1) {
-    const candidate = `[File ${filename} #${index}]`;
-    if (!existing.has(candidate) && countUnquotedToken(text, candidate) === 0) return candidate;
-  }
-  return `[File ${filename} #${crypto.randomUUID().slice(0, 8)}]`;
-}
-
-function countUnquotedToken(text: string, token: string) {
-  if (!token) return 0;
-  let count = 0;
-  let start = 0;
-  while (true) {
-    const index = text.indexOf(token, start);
-    if (index < 0) return count;
-    const end = index + token.length;
-    if (!isImmediatelyQuoted(text, index, end)) count += 1;
-    start = end;
-  }
-}
-
-function isImmediatelyQuoted(text: string, start: number, end: number) {
-  const pairs = new Set(['""', "''", "“”", "‘’"]);
-  if (start <= 0 || end >= text.length) return false;
-  return pairs.has(`${text[start - 1]}${text[end]}`);
-}
-
-function removeFirstToken(text: string, token: string) {
-  const index = text.indexOf(token);
-  if (index < 0) return text;
-  return `${text.slice(0, index)}${text.slice(index + token.length)}`.replace(/[ \t]{2,}/g, " ").trimStart();
-}
-
-function needsSpaceBefore(value: string) {
-  return value.length > 0 && !/\s$/.test(value);
-}
-
-function dragCarriesFiles(event: React.DragEvent<HTMLElement>) {
+}function dragCarriesFiles(event: React.DragEvent<HTMLElement>) {
   return Array.from(event.dataTransfer.types || []).includes("Files");
-}
-
-function positiveNumber(value?: number) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
-function connectionText(connection: string) {
-  if (connection === "open") return "工作台已连接";
-  if (connection === "error") return "正在恢复连接";
-  return "正在打开工作台";
-}
-
-function connectionState(connection: string): Status & { hint: string } {
-  if (connection === "open") return { label: "在线", hint: "变更会自动同步", className: "done" };
-  if (connection === "error") return { label: "恢复中", hint: "页面会自动接回", className: "running" };
-  return { label: "连接中", hint: "正在打开远程工作台", className: "running" };
-}
-
-function levelLabel(value?: string) {
-  return value ? LEVEL_LABELS[value] || value : "默认";
-}
-
-function modelLevelOptions(capabilities: RemoteCapabilities | null, currentValue = "") {
-  const levels = capabilities?.core?.models?.levels || [];
-  const defaultLevel = capabilities?.core?.models?.default_level || "";
-  const options = levels.length
-    ? [
-        { value: "", label: defaultLevel ? `默认（${levelLabel(defaultLevel)}）` : "默认" },
-        ...levels.map((level) => {
-          const value = String(level.id || "");
-          const model = String(level.model || level.model_name || "");
-          const label = levelLabel(value);
-          return { value, label: model ? `${label} · ${model}` : label };
-        }).filter((option) => option.value),
-      ]
-    : LEVEL_OPTIONS;
-  if (currentValue && !options.some((option) => option.value === currentValue)) {
-    return [...options, { value: currentValue, label: levelLabel(currentValue) }];
-  }
-  return options;
-}
-
-function mentionGroups(capabilities: RemoteCapabilities | null): Array<{ key: string; label: string; icon: React.ReactNode; items: PickerItemSummary[] }> {
+}function mentionGroups(capabilities: RemoteCapabilities | null): Array<{ key: string; label: string; icon: React.ReactNode; items: PickerItemSummary[] }> {
   const pickers = capabilities?.core?.pickers || {};
   const mcpItems = mentionItems(pickers.mcp);
   const skillItems = mentionItems(pickers.skills);
@@ -3647,255 +2002,4 @@ function mentionGroups(capabilities: RemoteCapabilities | null): Array<{ key: st
     { key: "mcp", label: "MCP", icon: <Workflow size={14} />, items: mcpItems },
     { key: "skills", label: "Skills", icon: <Sparkles size={14} />, items: skillItems },
   ].filter((group) => group.items.length || group.key === "mcp" || group.key === "skills");
-}
-
-function mentionItems(picker?: PickerSummary) {
-  if (!picker?.available) return [];
-  const seen = new Set<string>();
-  return (picker.items || [])
-    .filter((item) => {
-      const value = String(item.value || "");
-      if (!value || seen.has(value)) return false;
-      seen.add(value);
-      return true;
-    })
-    .slice(0, 8);
-}
-
-function appendComposerToken(text: string, token: string) {
-  const cleanToken = token.trim();
-  if (!cleanToken) return text;
-  const prefix = needsSpaceBefore(text) ? `${text} ` : text;
-  return `${prefix}${cleanToken} `;
-}
-
-function toolIndexSummary(pickers: Record<string, PickerSummary> = {}) {
-  const total = ["mcp", "skills"].reduce((sum, key) => {
-    const picker = pickers[key];
-    if (!picker?.available) return sum;
-    return sum + Number(picker.total || picker.items?.length || 0);
-  }, 0);
-  const connected = ["mcp", "skills"].filter((key) => pickers[key]?.available).length;
-  if (connected && total) return `${total} 个条目`;
-  if (connected) return `${connected} 个插入源`;
-  return "等待启用";
-}
-
-function pickerItemTitle(item: PickerItemSummary) {
-  const value = String(item.value || item.id || "").replace(/^@/, "");
-  if (!value) return item.kind || "条目";
-  const parts = value.split(/[/:]+/).filter(Boolean);
-  return parts.at(-1) || value;
-}
-
-function conflictLabel(value?: string) {
-  return value ? CONFLICT_LABELS[value] || value : CONFLICT_LABELS.queue;
-}
-
-function capabilityRow(feature: CapabilityFeature, index: number) {
-  const id = String(feature.id || "");
-  const status = capabilityStatus(feature.status);
-  return {
-    key: feature.id || feature.label || String(index),
-    label: feature.label || capabilityLabel(id),
-    detail: capabilityDetail(id, feature.detail),
-    status: status.label,
-    stateClass: status.className,
-  };
-}
-
-function capabilityLabel(id: string) {
-  const labels: Record<string, string> = {
-    threads: "线程",
-    transcript: "转录",
-    composer: "输入框",
-    attachments: "附件",
-    status: "状态",
-    interrupt: "停止",
-    config: "配置",
-    models: "模型",
-    mcp: "MCP",
-    skills: "技能",
-  };
-  return labels[id] || "能力";
-}
-
-function capabilityStatus(status?: string): { label: string; className: Status["className"] } {
-  if (status === "available") return { label: "可用", className: "done" };
-  if (status === "partial") return { label: "部分可用", className: "running" };
-  if (status === "unavailable") return { label: "不可用", className: "muted" };
-  if (status === "needs_core_api") return { label: "待接入", className: "muted" };
-  return { label: "规划中", className: "muted" };
-}
-
-function capabilityDetail(id: string, detail = "") {
-  if (["models", "mcp", "skills"].includes(id) && detail) {
-    return sanitizeCapabilityDetail(detail);
-  }
-  const details: Record<string, string> = {
-    threads: "任务入口、历史记录和标题管理",
-    transcript: "消息、工具结果、素材和文件变更",
-    composer: "多行输入、档位和提交策略",
-    attachments: "图片上下文和文件素材",
-    status: "连接状态、会话保护和远程入口",
-    interrupt: "运行中任务可停止",
-    config: "显示远程控制配置",
-    models: "模型和档位摘要",
-    mcp: "MCP 插入源",
-    skills: "技能索引",
-  };
-  return details[id] || sanitizeCapabilityDetail(detail) || "按服务能力显示";
-}
-
-function sanitizeCapabilityDetail(detail: string) {
-  return detail
-    .replace(/\bdaemon\b/gi, "远程服务")
-    .replace(/\bSSE\b/g, "实时连接")
-    .replace(/\bblob token\b/gi, "文件标记")
-    .replace(/\bblob\b/gi, "素材")
-    .replace(/\blevel\b/gi, "档位")
-    .replace(/\bMCP declarations\b/gi, "MCP 服务")
-    .replace(/\bmention\b/gi, "插入")
-    .replace(/\bskill picker\b/gi, "技能选择器")
-    .replace(/\bUI API\b/gi, "界面接口")
-    .replace(/缓存/g, "本地恢复")
-    .trim();
-}
-
-function capabilitySummary(features: CapabilityFeature[]) {
-  const available = features.filter((feature) => feature.status === "available").length;
-  const partial = features.filter((feature) => feature.status === "partial").length;
-  const waiting = features.filter((feature) => feature.status === "needs_core_api").length;
-  const unavailable = features.length - available - partial - waiting;
-  const parts = [
-    available ? `${available} 项可用` : "",
-    partial ? `${partial} 项部分可用` : "",
-    waiting ? `${waiting} 项待接入` : "",
-    unavailable > 0 ? `${unavailable} 项待补齐` : "",
-  ].filter(Boolean);
-  return parts.join(" · ") || "按服务能力显示";
-}
-
-function uploadLimitText(limits: RemoteCapabilities["limits"] = {}) {
-  const parts = [
-    limits.max_attachments ? `${limits.max_attachments} 个附件` : "",
-    limits.max_message_bytes ? `${formatBytes(limits.max_message_bytes)} 消息` : "",
-  ].filter(Boolean);
-  return parts.join(" · ") || "按服务配置";
-}
-
-function dateValue(value?: string) {
-  if (!value) return 0;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
-
-function formatRelativeTime(value?: string) {
-  const time = dateValue(value);
-  if (!time) return "";
-  const diff = Math.max(0, Date.now() - time);
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (diff < minute) return "刚刚";
-  if (diff < hour) return `${Math.floor(diff / minute)}分钟`;
-  if (diff < day) return `${Math.floor(diff / hour)}小时`;
-  if (diff < 7 * day) return `${Math.floor(diff / day)}天`;
-  return new Intl.DateTimeFormat(undefined, { month: "2-digit", day: "2-digit" }).format(new Date(time));
-}
-
-function formatBytes(value?: number) {
-  const bytes = Number(value || 0);
-  if (!Number.isFinite(bytes) || bytes <= 0) return "-";
-  const units = ["B", "KB", "MB", "GB"];
-  let size = bytes;
-  let index = 0;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index += 1;
-  }
-  const rounded = size >= 10 || index === 0 ? Math.round(size) : Math.round(size * 10) / 10;
-  return `${rounded}${units[index]}`;
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error || "");
-}
-
-function autoSize(input: HTMLTextAreaElement | null) {
-  if (!input) return;
-  input.style.height = "auto";
-  input.style.height = `${Math.min(168, input.scrollHeight)}px`;
-}
-
-function openCache(): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
-    if (!("indexedDB" in window)) {
-      resolve(null);
-      return;
-    }
-    const request = indexedDB.open(CACHE_DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      const events = database.createObjectStore("events", { keyPath: "key" });
-      events.createIndex("thread", "thread_id", { unique: false });
-      events.createIndex("stored", "stored_at", { unique: false });
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => resolve(null);
-  });
-}
-
-async function cachePutEvents(db: IDBDatabase, threadId: string, events: TimelineEvent[]) {
-  if (!events.length) return;
-  const tx = db.transaction("events", "readwrite");
-  const store = tx.objectStore("events");
-  const now = Date.now();
-  for (const event of events) {
-    if (!event._event_id) continue;
-    const payload = JSON.stringify(event);
-    store.put({ key: `${threadId}:${event._event_id}`, thread_id: threadId, event_id: event._event_id, stored_at: now, bytes: payload.length, event });
-  }
-  await txDone(tx);
-  pruneCache(db).catch(() => undefined);
-}
-
-async function cacheGetEvents(db: IDBDatabase, threadId: string) {
-  const tx = db.transaction("events", "readonly");
-  const index = tx.objectStore("events").index("thread");
-  const rows = await getAll(index, IDBKeyRange.only(threadId));
-  return rows.map((row) => row.event as TimelineEvent).sort((a, b) => Number(a._event_id || 0) - Number(b._event_id || 0));
-}
-
-async function pruneCache(db: IDBDatabase) {
-  const tx = db.transaction("events", "readwrite");
-  const store = tx.objectStore("events");
-  const rows = await getAll(store);
-  rows.sort((a, b) => Number(a.stored_at || 0) - Number(b.stored_at || 0));
-  let bytes = rows.reduce((sum, row) => sum + Number(row.bytes || 0), 0);
-  while ((rows.length > 2500 || bytes > 8 * 1024 * 1024) && rows.length) {
-    const row = rows.shift();
-    if (!row) break;
-    bytes -= Number(row.bytes || 0);
-    store.delete(row.key as IDBValidKey);
-  }
-  await txDone(tx);
-}
-
-function getAll(source: IDBObjectStore | IDBIndex, query?: IDBValidKey | IDBKeyRange): Promise<Json[]> {
-  return new Promise((resolve, reject) => {
-    const request = source.getAll(query);
-    request.onsuccess = () => resolve(request.result as Json[]);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function txDone(tx: IDBTransaction) {
-  return new Promise<void>((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-}
-
-createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+}createRoot(document.getElementById("root") as HTMLElement).render(<App />);
