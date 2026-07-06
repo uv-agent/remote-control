@@ -1,5 +1,6 @@
 node_modules/
 .venv/
+src/uv_agent_remote_control/web/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

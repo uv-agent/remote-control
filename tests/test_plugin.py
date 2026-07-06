@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import threading
 from dataclasses import dataclass
+from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
@@ -14,6 +14,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 import pytest
 from uv_agent.plugins import SetupPlugin
 
+import uv_agent_remote_control.service as service_module
 from uv_agent_remote_control import MANIFEST, _SERVICES, plugin, setup, stop
 from uv_agent_remote_control.service import EventHub, RemoteControlConfig, RemoteControlService
 
@@ -235,19 +236,46 @@ def test_service_auth_none_serves_threads(tmp_path: Path) -> None:
             service.stop()
 
 
-def test_service_serves_vite_chunk_assets(tmp_path: Path) -> None:
+def test_service_serves_packaged_web_assets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    package_root = tmp_path / "package"
+    web_root = package_root / "web"
+    chunks_root = web_root / "chunks"
+    chunks_root.mkdir(parents=True)
+    (web_root / "index.html").write_text(
+        '<link rel="modulepreload" crossorigin href="/chunks/vendor.js"><script type="module" src="/app.js"></script>',
+        encoding="utf-8",
+    )
+    (web_root / "app.js").write_text("console.log('app')", encoding="utf-8")
+    (web_root / "styles.css").write_text("@font-face{font-family:MiSans}", encoding="utf-8")
+    (web_root / "MiSans-LICENSE.txt").write_text("MiSans license", encoding="utf-8")
+    (web_root / "MiSans-Regular.woff2").write_bytes(b"wOF2-test")
+    (chunks_root / "vendor.js").write_text("console.log('vendor')", encoding="utf-8")
+    monkeypatch.setattr(service_module.resources, "files", lambda package: package_root)
+
     context = make_context(tmp_path)
     with LoopThread() as loop:
         service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
         service.start()
         try:
-            index = urlopen(f"{service.url}/", timeout=REQUEST_TIMEOUT_S).read().decode("utf-8")
-            match = re.search(r'href="/(chunks/[^"]+\.js)"', index)
-            assert match is not None
+            index = urlopen(f"{service.url}/", timeout=REQUEST_TIMEOUT_S)
+            assert index.headers.get_content_type() == "text/html"
+            assert "/chunks/vendor.js" in index.read().decode("utf-8")
 
-            response = urlopen(f"{service.url}/{match.group(1)}", timeout=REQUEST_TIMEOUT_S)
-            assert response.headers.get_content_type() == "application/javascript"
-            assert response.read(32)
+            chunk = urlopen(f"{service.url}/chunks/vendor.js", timeout=REQUEST_TIMEOUT_S)
+            assert chunk.headers.get_content_type() == "application/javascript"
+            assert chunk.read(32)
+
+            font = urlopen(f"{service.url}/MiSans-Regular.woff2", timeout=REQUEST_TIMEOUT_S)
+            assert font.headers.get_content_type() == "font/woff2"
+            assert font.read() == b"wOF2-test"
+
+            license_file = urlopen(f"{service.url}/MiSans-LICENSE.txt", timeout=REQUEST_TIMEOUT_S)
+            assert license_file.headers.get_content_type() == "text/plain"
+            assert "MiSans license" in license_file.read().decode("utf-8")
+
+            with pytest.raises(HTTPError) as missing:
+                urlopen(f"{service.url}/Missing.woff2", timeout=REQUEST_TIMEOUT_S)
+            assert missing.value.code == HTTPStatus.NOT_FOUND
         finally:
             service.stop()
 

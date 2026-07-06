@@ -601,20 +601,35 @@ class RemoteControlService:
                 if any(part in {"", ".", ".."} for part in parts):
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
-                if len(parts) == 1 and parts[0] in {"index.html", "app.js", "styles.css"}:
-                    resource = resources.files("uv_agent_remote_control") / "web" / parts[0]
+                root_name = parts[0] if len(parts) == 1 else ""
+                if (
+                    root_name in {"index.html", "app.js", "styles.css", "MiSans-LICENSE.txt"}
+                    or root_name.endswith(".woff2")
+                ):
+                    resource = resources.files("uv_agent_remote_control") / "web" / root_name
                 elif len(parts) == 2 and parts[0] == "chunks" and parts[1].endswith(".js"):
                     resource = resources.files("uv_agent_remote_control") / "web" / "chunks" / parts[1]
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
-                data = resource.read_bytes()
+                try:
+                    data = resource.read_bytes()
+                except FileNotFoundError:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
                 name = parts[-1]
-                content_type = {
-                    "index.html": "text/html; charset=utf-8",
-                    "app.js": "application/javascript; charset=utf-8",
-                    "styles.css": "text/css; charset=utf-8",
-                }.get(name, "application/javascript; charset=utf-8")
+                if name.endswith(".html"):
+                    content_type = "text/html; charset=utf-8"
+                elif name.endswith(".js"):
+                    content_type = "application/javascript; charset=utf-8"
+                elif name.endswith(".css"):
+                    content_type = "text/css; charset=utf-8"
+                elif name.endswith(".woff2"):
+                    content_type = "font/woff2"
+                elif name.endswith(".txt"):
+                    content_type = "text/plain; charset=utf-8"
+                else:
+                    content_type = "application/octet-stream"
                 self._send_bytes(HTTPStatus.OK, data, content_type=content_type)
 
             def _send_json(self, payload: dict[str, Any], *, status: HTTPStatus = HTTPStatus.OK) -> None:
