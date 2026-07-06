@@ -17,6 +17,8 @@ from uv_agent.plugins import SetupPlugin
 from uv_agent_remote_control import MANIFEST, _SERVICES, plugin, setup, stop
 from uv_agent_remote_control.service import EventHub, RemoteControlConfig, RemoteControlService
 
+REQUEST_TIMEOUT_S = 5
+
 
 class EventRecorder:
     def __init__(self) -> None:
@@ -153,6 +155,10 @@ def make_setup_context(tmp_path: Path, *, config=None, action_found=True):
     return context
 
 
+def loopback_config(**kwargs) -> RemoteControlConfig:
+    return RemoteControlConfig(host="127.0.0.1", port=0, **kwargs)
+
+
 def test_plugin_entrypoint_manifest() -> None:
     loaded = plugin()
 
@@ -217,7 +223,7 @@ def test_event_hub_replay_reports_evicted_gap() -> None:
 def test_service_auth_none_serves_threads(tmp_path: Path) -> None:
     context = make_context(tmp_path)
     with LoopThread() as loop:
-        service = RemoteControlService(RemoteControlConfig(port=0, auth_mode="none"), context=context, loop=loop)
+        service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
         service.start()
         try:
             status = read_json(f"{service.url}/api/auth/status")
@@ -232,14 +238,14 @@ def test_service_auth_none_serves_threads(tmp_path: Path) -> None:
 def test_service_serves_vite_chunk_assets(tmp_path: Path) -> None:
     context = make_context(tmp_path)
     with LoopThread() as loop:
-        service = RemoteControlService(RemoteControlConfig(port=0, auth_mode="none"), context=context, loop=loop)
+        service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
         service.start()
         try:
-            index = urlopen(f"{service.url}/").read().decode("utf-8")
+            index = urlopen(f"{service.url}/", timeout=REQUEST_TIMEOUT_S).read().decode("utf-8")
             match = re.search(r'href="/(chunks/[^"]+\.js)"', index)
             assert match is not None
 
-            response = urlopen(f"{service.url}/{match.group(1)}")
+            response = urlopen(f"{service.url}/{match.group(1)}", timeout=REQUEST_TIMEOUT_S)
             assert response.headers.get_content_type() == "application/javascript"
             assert response.read(32)
         finally:
@@ -249,7 +255,7 @@ def test_service_serves_vite_chunk_assets(tmp_path: Path) -> None:
 def test_service_capabilities_reports_tui_coverage(tmp_path: Path) -> None:
     context = make_context(tmp_path)
     with LoopThread() as loop:
-        service = RemoteControlService(RemoteControlConfig(port=0, auth_mode="none"), context=context, loop=loop)
+        service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
         service.start()
         try:
             capabilities = read_json(f"{service.url}/api/capabilities")
@@ -279,7 +285,7 @@ def test_service_capabilities_uses_core_agent_summary(tmp_path: Path) -> None:
         },
     )
     with LoopThread() as loop:
-        service = RemoteControlService(RemoteControlConfig(port=0, auth_mode="none"), context=context, loop=loop)
+        service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
         service.start()
         try:
             capabilities = read_json(f"{service.url}/api/capabilities")
@@ -296,12 +302,12 @@ def test_service_capabilities_uses_core_agent_summary(tmp_path: Path) -> None:
 def test_service_auth_code_sets_session_cookie(tmp_path: Path) -> None:
     context = make_context(tmp_path)
     with LoopThread() as loop:
-        service = RemoteControlService(RemoteControlConfig(port=0, auth_mode="auth-code"), context=context, loop=loop)
+        service = RemoteControlService(loopback_config(auth_mode="auth-code"), context=context, loop=loop)
         service.start()
         opener = build_opener(HTTPCookieProcessor())
         try:
             with pytest.raises(HTTPError) as unauthorized:
-                opener.open(f"{service.url}/api/threads")
+                opener.open(f"{service.url}/api/threads", timeout=REQUEST_TIMEOUT_S)
             assert unauthorized.value.code == 401
 
             response = opener.open(
@@ -310,10 +316,11 @@ def test_service_auth_code_sets_session_cookie(tmp_path: Path) -> None:
                     data=json.dumps({"code": "A7K2Q9"}).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                     method="POST",
-                )
+                ),
+                timeout=REQUEST_TIMEOUT_S,
             )
             assert json.loads(response.read().decode("utf-8"))["verified"] is True
-            threads = json.loads(opener.open(f"{service.url}/api/threads").read().decode("utf-8"))
+            threads = json.loads(opener.open(f"{service.url}/api/threads", timeout=REQUEST_TIMEOUT_S).read().decode("utf-8"))
 
             assert context.actions.calls == [("auth_code.verify", {"code": "A7K2Q9"})]
             assert threads["threads"][0]["thread_id"] == "thr_1"
@@ -353,7 +360,7 @@ def test_service_submit_multipart_uploads_attachments_and_starts_turn(tmp_path: 
     )
 
     with LoopThread() as loop:
-        service = RemoteControlService(RemoteControlConfig(port=0, auth_mode="none"), context=context, loop=loop)
+        service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
         service.start()
         try:
             result = read_json(
@@ -376,7 +383,7 @@ def test_service_submit_multipart_uploads_attachments_and_starts_turn(tmp_path: 
 
 
 def read_json(url: str, *, data: bytes | None = None, headers: dict[str, str] | None = None, method: str = "GET"):
-    response = urlopen(Request(url, data=data, headers=headers or {}, method=method))
+    response = urlopen(Request(url, data=data, headers=headers or {}, method=method), timeout=REQUEST_TIMEOUT_S)
     return json.loads(response.read().decode("utf-8"))
 
 

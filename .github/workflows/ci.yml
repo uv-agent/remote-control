@@ -55,7 +55,8 @@ jobs:
         run: uv sync --locked --dev
 
       - name: Run Python tests
-        run: uv run pytest
+        timeout-minutes: 10
+        run: uv run pytest -vv --durations=20
 
       - name: Build distributions
         run: uv build
