@@ -11,14 +11,14 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import CancelledError, Future
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from pathlib import PurePosixPath
+from pathlib import PurePath, PurePosixPath
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
 
@@ -297,7 +297,7 @@ class RemoteControlService:
             return
         if event_type.startswith("plugin."):
             return
-        self.events.publish({"kind": "live_event", "thread_id": event.get("thread_id"), "event": dict(event)})
+        self.events.publish({"kind": "live_event", "thread_id": event.get("thread_id"), "event": _json_value(dict(event))})
 
     def _run_async(self, coro, *, timeout: float = 30.0) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
@@ -376,10 +376,12 @@ class RemoteControlService:
             event = dict(raw_event)
             if request_id and not event.get("request_id"):
                 event["request_id"] = request_id
+            if request_id and not any(event.get(key) for key in ("turn_id", "run_id", "response_id")):
+                event["turn_id"] = request_id
             thread_id = str(event.get("thread_id") or getattr(handle, "thread_id", "") or fallback_thread_id or "")
             if thread_id and not event.get("thread_id"):
                 event["thread_id"] = thread_id
-            self.events.publish({"kind": "live_event", "thread_id": thread_id, "event": event})
+            self.events.publish({"kind": "live_event", "thread_id": thread_id, "event": _json_value(event)})
 
     def run_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         registry = _command_registry(self.context)
@@ -667,7 +669,7 @@ class RemoteControlService:
                     service.events.unsubscribe(subscriber)
 
             def _write_sse(self, seq: int, payload: dict[str, Any]) -> None:
-                body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                body = json.dumps(_json_value(payload), ensure_ascii=False, separators=(",", ":"))
                 self.wfile.write(f"id: {seq}\n".encode("utf-8"))
                 self.wfile.write(b"event: message\n")
                 for line in body.splitlines() or [""]:
@@ -834,6 +836,26 @@ def _json_safe(value: Any) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+
+def _json_value(value: Any, *, _depth: int = 0) -> Any:
+    if _depth > 8:
+        return str(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item, _depth=_depth + 1) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_value(item, _depth=_depth + 1) for item in value]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"bytes": len(value)}
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_value(asdict(value), _depth=_depth + 1)
+    if isinstance(value, PurePath):
+        return str(value)
+    if hasattr(value, "__dict__"):
+        return _json_value(vars(value), _depth=_depth + 1)
+    return str(value)
 
 
 def _thread_route(path: str) -> tuple[str | None, str]:

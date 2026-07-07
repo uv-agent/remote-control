@@ -93,6 +93,7 @@ import {
   processDigestSummary,
   processWorkLabel,
   projectUpdatedAt,
+  reasoningTextForEvent,
   removeFirstToken,
   shouldFoldText,
   statusForThread,
@@ -313,7 +314,7 @@ function App() {
   }
 
   function applyLiveEvent(event: TimelineEvent) {
-    const turnId = String(event.turn_id || "");
+    const turnId = eventTurnKey(event, "");
     if (!turnId) return;
     if (event.type === "response.output_text.delta" || event.type === "assistant.delta" || event.type === "assistant.message.delta") {
       setLiveDrafts((previous) => new Map(previous).set(turnId, (previous.get(turnId) || "") + (event.delta || event.text || "")));
@@ -326,7 +327,7 @@ function App() {
     if (isLiveTimelineEvent(event)) {
       setLiveEvents((previous) => [...previous, { ...event, _event_id: `live-${Date.now()}-${previous.length}` }].slice(-100));
     }
-    if (["turn.completed", "turn.interrupted", "turn.error", "item.model_response", "item.assistant", "assistant.message.completed", "assistant.completed", "response.output_text.done"].includes(String(event.type || ""))) {
+    if (["turn.completed", "turn.interrupted", "turn.error", "model.response", "item.model_response", "item.assistant", "assistant.message.completed", "assistant.completed", "response.output_text.done"].includes(String(event.type || ""))) {
       setLiveDrafts((previous) => {
         const next = new Map(previous);
         next.delete(turnId);
@@ -1154,11 +1155,16 @@ function ComposerActionMenu({
   addAttachment: () => void;
   openCommands: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [panel, setPanel] = useState<"main" | "models">("main");
   const levelOptions = modelLevelOptions(capabilities, selectedLevel);
   const selected = selectedLevel || SELECT_DEFAULT_VALUE;
   const selectedLabel = modelLevelDisplayLabel(selectedLevel || capabilities?.core?.models?.default_level || "");
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root open={open} onOpenChange={(next) => {
+      setOpen(next);
+      if (!next) setPanel("main");
+    }}>
       <DropdownMenu.Trigger asChild>
         <button className="tool-btn plus-tool" type="button" title="添加功能" aria-label="添加功能">
           <Plus size={17} />
@@ -1166,49 +1172,73 @@ function ComposerActionMenu({
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="dropdown-panel composer-action-panel" sideOffset={8} align="start">
-          <DropdownMenu.Item className="dropdown-item composer-action-item" onSelect={addAttachment}>
-            <span className="composer-action-icon"><Paperclip size={15} /></span>
-            <span className="composer-action-main">
-              <strong>附件</strong>
-              <small>添加图片或文件</small>
-            </span>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className="dropdown-item composer-action-item" onSelect={openCommands}>
-            <span className="composer-action-icon"><Search size={15} /></span>
-            <span className="composer-action-main">
-              <strong>命令</strong>
-              <small>打开命令面板</small>
-            </span>
-          </DropdownMenu.Item>
-          <DropdownMenu.Sub>
-            <DropdownMenu.SubTrigger className="dropdown-item composer-action-item">
+          {panel === "main" ? (
+            <>
+              <DropdownMenu.Item className="dropdown-item composer-action-item" onSelect={addAttachment}>
+                <span className="composer-action-icon"><Paperclip size={15} /></span>
+                <span className="composer-action-main">
+                  <strong>附件</strong>
+                  <small>添加图片或文件</small>
+                </span>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="dropdown-item composer-action-item" onSelect={openCommands}>
+                <span className="composer-action-icon"><Search size={15} /></span>
+                <span className="composer-action-main">
+                  <strong>命令</strong>
+                  <small>打开命令面板</small>
+                </span>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="dropdown-item composer-action-item"
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setPanel("models");
+                }}
+              >
               <span className="composer-action-icon"><Sparkles size={15} /></span>
               <span className="composer-action-main">
                 <strong>模型/档位</strong>
                 <small>{selectedLabel}</small>
               </span>
               <span className="composer-action-arrow" aria-hidden="true">›</span>
-            </DropdownMenu.SubTrigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.SubContent className="dropdown-panel composer-sub-panel" sideOffset={8} alignOffset={-6}>
-                <DropdownMenu.Label className="dropdown-label">选择模型档位</DropdownMenu.Label>
-                {levelOptions.map((option) => {
-                  const optionValue = option.value || SELECT_DEFAULT_VALUE;
-                  const checked = optionValue === selected;
-                  return (
-                    <DropdownMenu.Item
-                      className="dropdown-item model-menu-item"
-                      key={`level-${optionValue}`}
-                      onSelect={() => setSelectedLevel(option.value)}
-                    >
-                      <span className="model-menu-check">{checked && <Check size={14} />}</span>
-                      <span className="model-menu-main">{option.label}</span>
-                    </DropdownMenu.Item>
-                  );
-                })}
-              </DropdownMenu.SubContent>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Sub>
+              </DropdownMenu.Item>
+            </>
+          ) : (
+            <>
+              <DropdownMenu.Item
+                className="dropdown-item composer-action-item compact-back"
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setPanel("main");
+                }}
+              >
+                <span className="composer-action-icon"><ChevronLeft size={15} /></span>
+                <span className="composer-action-main">
+                  <strong>模型/档位</strong>
+                  <small>选择本轮使用的档位</small>
+                </span>
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="dropdown-separator" />
+              {levelOptions.map((option) => {
+                const optionValue = option.value || SELECT_DEFAULT_VALUE;
+                const checked = optionValue === selected;
+                return (
+                  <DropdownMenu.Item
+                    className="dropdown-item model-menu-item"
+                    key={`level-${optionValue}`}
+                    onSelect={() => {
+                      setSelectedLevel(option.value);
+                      setOpen(false);
+                      setPanel("main");
+                    }}
+                  >
+                    <span className="model-menu-check">{checked && <Check size={14} />}</span>
+                    <span className="model-menu-main">{option.label}</span>
+                  </DropdownMenu.Item>
+                );
+              })}
+            </>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -1281,6 +1311,10 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
   for (const [index, event] of props.events.entries()) {
     if (queueAssistantDelta(event, `stored-${index}`)) continue;
     if (isUserDisplayEvent(event)) flushAssistantBuffers();
+    const reasoningText = reasoningTextForEvent(event);
+    if (isAssistantFinalEvent(event) && reasoningText.trim()) {
+      items.push({ kind: "message", key: `reasoning-${displayEventKey(event, `stored-${index}`)}`, role: "reasoning", label: "工作过程", text: reasoningText, time: eventTimeLabel(event), occurredAt: displayEventTime(event) });
+    }
     if (isAssistantFinalEvent(event)) assistantBuffers.delete(eventTurnKey(event, `stored-${index}`));
     const item = displayItemForEvent(event, `stored-${index}`);
     if (item) items.push(item);
@@ -1288,12 +1322,16 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
   for (const [index, event] of liveEvents.entries()) {
     if (queueAssistantDelta(event, `live-${index}`)) continue;
     if (isUserDisplayEvent(event)) flushAssistantBuffers();
+    const reasoningText = reasoningTextForEvent(event);
+    if (isAssistantFinalEvent(event) && reasoningText.trim()) {
+      items.push({ kind: "message", key: `reasoning-${displayEventKey(event, `live-${index}`)}`, role: "reasoning", label: "工作过程", text: reasoningText, time: eventTimeLabel(event), occurredAt: displayEventTime(event) });
+    }
     if (isAssistantFinalEvent(event)) assistantBuffers.delete(eventTurnKey(event, `live-${index}`));
     const item = displayItemForEvent(event, `live-${index}`);
     if (item) items.push(item);
   }
   flushAssistantBuffers();
-  const visibleTurnIds = new Set(liveEvents.map((event) => String(event.turn_id || "")).filter(Boolean));
+  const visibleTurnIds = new Set(liveEvents.map((event, index) => eventTurnKey(event, `live-${index}`)).filter(Boolean));
   for (const [turnId, text] of props.liveReasoningDrafts) {
     if (visibleTurnIds.size && !visibleTurnIds.has(turnId)) continue;
     items.push({ kind: "message", key: `reasoning-draft-${turnId}`, role: "reasoning", label: "思考", text });

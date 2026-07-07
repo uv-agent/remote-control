@@ -2910,7 +2910,9 @@ body[data-connection="error"] .connection-dot {
 }
 
 .composer-action-panel {
-  width: min(300px, calc(100vw - 24px));
+  width: min(330px, calc(100vw - 20px));
+  max-height: min(430px, calc(100dvh - 96px));
+  overflow: auto;
   padding: 4px;
 }
 
@@ -2967,15 +2969,12 @@ body[data-connection="error"] .connection-dot {
   line-height: 1;
 }
 
-.composer-sub-panel {
-  width: min(390px, calc(100vw - 24px));
-  max-height: min(420px, calc(100dvh - 120px));
-  overflow: auto;
-  padding: 4px;
+.composer-action-item.compact-back {
+  min-height: 40px;
 }
 
 .model-menu-item {
-  min-height: 36px;
+  min-height: 40px;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
 }

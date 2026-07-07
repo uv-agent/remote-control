@@ -490,11 +490,25 @@ def test_service_submit_multipart_uploads_attachments_and_starts_turn(tmp_path: 
 
 
 def test_service_forwards_live_turn_events_to_sse_ring(tmp_path: Path) -> None:
+    @dataclass
+    class FakeResponse:
+        output_text: str
+        output: list[dict]
+        reasoning_text: str = ""
+
     context = make_context(tmp_path)
     context.next_handle_events = [
-        {"type": "turn.started", "turn_id": "turn_1"},
-        {"type": "tool.output", "turn_id": "turn_1", "output": "python ok"},
-        {"type": "turn.completed", "turn_id": "turn_1"},
+        {"type": "turn.started"},
+        {"type": "tool.output", "output": "python ok"},
+        {
+            "type": "model.response",
+            "response": FakeResponse(
+                output_text="done",
+                output=[{"type": "message", "content": [{"type": "output_text", "text": "done"}]}],
+                reasoning_text="thinking",
+            ),
+        },
+        {"type": "turn.completed"},
     ]
 
     with LoopThread() as loop:
@@ -515,14 +529,16 @@ def test_service_forwards_live_turn_events_to_sse_ring(tmp_path: Path) -> None:
                 replay, ok = service.events.replay_after(0)
                 assert ok is True
                 events = [item.payload for item in replay]
-                if sum(1 for item in events if item.get("kind") == "live_event") >= 3:
+                if sum(1 for item in events if item.get("kind") == "live_event") >= 4:
                     break
                 time.sleep(0.02)
 
             live = [item["event"] for item in events if item.get("kind") == "live_event"]
-            assert [item["type"] for item in live] == ["turn.started", "tool.output", "turn.completed"]
+            assert [item["type"] for item in live] == ["turn.started", "tool.output", "model.response", "turn.completed"]
             assert all(item["thread_id"] == "thr_1" for item in live)
             assert all(item["request_id"] == "req_1" for item in live)
+            assert all(item["turn_id"] == "req_1" for item in live)
+            assert live[2]["response"]["output_text"] == "done"
         finally:
             service.stop()
 

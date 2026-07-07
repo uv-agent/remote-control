@@ -59,7 +59,7 @@ export function displayEventKey(event: TimelineEvent, fallback: string) {
 }
 
 export function eventTurnKey(event: TimelineEvent, fallback: string) {
-  return String(event.turn_id || event.run_id || event.response_id || event.thread_id || fallback);
+  return String(event.turn_id || event.request_id || event.run_id || event.response_id || event.thread_id || fallback);
 }
 
 export function isUserDisplayEvent(event: TimelineEvent) {
@@ -77,6 +77,7 @@ export function isAssistantDeltaEvent(event: TimelineEvent) {
 
 export function isAssistantFinalEvent(event: TimelineEvent) {
   return [
+    "model.response",
     "item.model_response",
     "item.assistant",
     "assistant.message.completed",
@@ -269,6 +270,7 @@ export function isLiveTimelineEvent(event: TimelineEvent) {
     "assistant.message.completed",
     "assistant.completed",
     "response.output_text.done",
+    "model.response",
     "item.assistant",
     "turn.submitted",
     "turn.started",
@@ -582,14 +584,20 @@ export function userTextForEvent(event: TimelineEvent) {
 }
 
 export function assistantTextForEvent(event: TimelineEvent) {
-  if (event.type === "item.model_response") {
-    const output = (event.output || []) as Json[];
-    const text = modelOutputText(output) || String(event.text || event.message || "");
+  if (event.type === "item.model_response" || event.type === "model.response") {
+    const response = event.response as Json | undefined;
+    const output = (Array.isArray(event.output) ? event.output : response?.output || []) as Json[];
+    const text = modelOutputText(output) || String(response?.output_text || event.text || event.message || "");
     return [text, modelToolSummary(output)].filter(Boolean).join("\n\n");
   }
   const output = Array.isArray(event.output) ? modelOutputText(event.output as Json[]) : "";
   const item = event.item as Json | undefined;
   return String(event.text || event.message || event.delta || output || itemText(item) || "");
+}
+
+export function reasoningTextForEvent(event: TimelineEvent) {
+  const response = event.response as Json | undefined;
+  return String(event.reasoning_text || response?.reasoning_text || "");
 }
 
 export function assistantDeltaText(event: TimelineEvent) {
