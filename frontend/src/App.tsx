@@ -660,6 +660,7 @@ function App() {
               openInfo={() => toggleInfoPane()}
               openInfoTab={openInfoTab}
               copyText={copyText}
+              desktop={desktop}
               editingTitle={editingTitle}
               draftTitle={draftTitle}
               setDraftTitle={setDraftTitle}
@@ -968,6 +969,7 @@ function ThreadPane(props: {
   openInfo: () => void;
   openInfoTab: (tab: InfoTab) => void;
   copyText: (text: string) => Promise<void>;
+  desktop: boolean;
   editingTitle: boolean;
   draftTitle: string;
   setDraftTitle: (value: string) => void;
@@ -1449,7 +1451,47 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
 
 function TurnUser({ item, props }: { item: DisplayMessage; props: React.ComponentProps<typeof ThreadPane> }) {
   const folded = shouldFoldText(item.text, 190, 4);
-  const actions = messageActions(item.text, props.copyText);
+  const hasText = Boolean(item.text.trim());
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const longPressTimer = useRef<number | null>(null);
+  const suppressClick = useRef(false);
+
+  const closeMenu = () => setMenu(null);
+  const openMenuAt = (x: number, y: number) => {
+    if (!hasText) return;
+    setMenu(clampMenuPosition(x, y));
+  };
+  const clearLongPress = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  const bubbleHandlers = {
+    onContextMenu: (event: React.MouseEvent<HTMLElement>) => {
+      if (!hasText) return;
+      event.preventDefault();
+      openMenuAt(event.clientX, event.clientY);
+    },
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      if (!hasText || props.desktop || event.pointerType === "mouse") return;
+      clearLongPress();
+      const { clientX, clientY } = event;
+      longPressTimer.current = window.setTimeout(() => {
+        suppressClick.current = true;
+        openMenuAt(clientX, clientY);
+      }, 520);
+    },
+    onPointerMove: clearLongPress,
+    onPointerUp: clearLongPress,
+    onPointerCancel: clearLongPress,
+    onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
+      if (!suppressClick.current) return;
+      suppressClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+  };
   if (!folded) {
     return (
       <div className="turn-user">
@@ -1457,10 +1499,10 @@ function TurnUser({ item, props }: { item: DisplayMessage; props: React.Componen
           <span>你</span>
           {item.time && <span>{item.time}</span>}
         </div>
-        <div className="turn-user-bubble">
+        <div className="turn-user-bubble" {...bubbleHandlers}>
           <div className="turn-user-text">{item.text}</div>
-          {item.text.trim() && <div className="message-actions">{actions}</div>}
         </div>
+        {menu && <UserMessageMenu point={menu} text={item.text} copyText={props.copyText} close={closeMenu} />}
       </div>
     );
   }
@@ -1470,14 +1512,70 @@ function TurnUser({ item, props }: { item: DisplayMessage; props: React.Componen
         <span>你</span>
         {item.time && <span>{item.time}</span>}
       </div>
-      <details className="turn-user-bubble foldable">
+      <details className="turn-user-bubble foldable" {...bubbleHandlers}>
         <summary>
           <span className="fold-preview">{textPreview(item.text, 92)}</span>
           <span className="fold-indicator" aria-hidden="true" />
         </summary>
         <div className="turn-user-text">{item.text}</div>
-        {item.text.trim() && <div className="message-actions">{actions}</div>}
       </details>
+      {menu && <UserMessageMenu point={menu} text={item.text} copyText={props.copyText} close={closeMenu} />}
+    </div>
+  );
+}
+
+function clampMenuPosition(x: number, y: number) {
+  const width = 154;
+  const height = 44;
+  const padding = 8;
+  return {
+    x: Math.min(Math.max(padding, x), Math.max(padding, window.innerWidth - width - padding)),
+    y: Math.min(Math.max(padding, y), Math.max(padding, window.innerHeight - height - padding)),
+  };
+}
+
+function UserMessageMenu({
+  point,
+  text,
+  copyText,
+  close,
+}: {
+  point: { x: number; y: number };
+  text: string;
+  copyText: (text: string) => Promise<void>;
+  close: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      close();
+    };
+    const keydown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", keydown);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [close]);
+  return (
+    <div ref={menuRef} className="message-context-menu" style={{ left: point.x, top: point.y }} role="menu">
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          void copyText(text);
+          close();
+        }}
+      >
+        <Copy size={14} />
+        <span>复制</span>
+      </button>
     </div>
   );
 }

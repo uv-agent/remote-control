@@ -1848,6 +1848,8 @@ body[data-connection="error"] .connection-dot {
   background: var(--elevated);
   color: var(--text);
   box-shadow: var(--shadow-soft);
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
 }
 
 .turn-user-bubble:hover,
@@ -2460,6 +2462,43 @@ body[data-connection="error"] .connection-dot {
 .message-action:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+.message-context-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 146px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+}
+
+.message-context-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 7px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+}
+
+.message-context-menu button:hover,
+.message-context-menu button:focus {
+  background: var(--hover);
+  outline: 0;
+}
+
+.message-context-menu svg {
+  flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .message-time {
