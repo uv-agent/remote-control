@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
@@ -12,7 +13,8 @@ from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 import pytest
-from uv_agent.plugins import SetupPlugin
+from uv_agent.plugins import CommandResult, SetComposerAction, SetupPlugin, TranscriptAction
+from uv_agent.plugins.registry import CommandSpec
 
 import uv_agent_remote_control.service as service_module
 from uv_agent_remote_control import MANIFEST, _SERVICES, plugin, setup, stop
@@ -54,6 +56,25 @@ class ActionCaller:
     async def call(self, action_id, payload, **_kwargs):
         self.calls.append((action_id, payload))
         return self.result
+
+
+class CommandRegistryStub:
+    def __init__(self) -> None:
+        self.items = {}
+
+    def add(self, spec) -> None:
+        self.items[spec.name] = spec
+        for alias in getattr(spec, "aliases", ()) or ():
+            self.items[alias] = spec
+
+    def list(self):
+        return sorted({id(spec): spec for spec in self.items.values()}.values(), key=lambda item: item.name)
+
+    def get(self, name):
+        key = str(name)
+        if not key.startswith("/"):
+            key = f"/{key}"
+        return self.items.get(key)
 
 
 class BlobRecorder:
@@ -106,12 +127,18 @@ class FakeHandle:
     request_id: str
     thread_id: str
     status: str = "queued"
+    events_list: list[dict] | None = None
 
     def __post_init__(self) -> None:
         self.cancel_event = asyncio.Event()
 
     async def wait(self):
         return self
+
+    async def events(self):
+        for event in self.events_list or []:
+            await asyncio.sleep(0)
+            yield event
 
 
 class LoopThread:
@@ -132,20 +159,28 @@ def make_context(tmp_path: Path):
 
     async def start_turn(**kwargs):
         start_calls.append(dict(kwargs))
-        return FakeHandle(request_id=f"req_{len(start_calls)}", thread_id=kwargs["thread_id"])
+        return FakeHandle(
+            request_id=f"req_{len(start_calls)}",
+            thread_id=kwargs["thread_id"],
+            events_list=list(getattr(context, "next_handle_events", [])),
+        )
 
+    command_registry = CommandRegistryStub()
     context = SimpleNamespace(
         config={},
         host=SimpleNamespace(invocation="daemon", lifetime="persistent", is_persistent=True),
         logger=logging.getLogger("test.remote-control"),
         events=EventRecorder(),
         actions=ActionCaller(),
+        commands=SimpleNamespace(_registry=command_registry),
         blobs=BlobRecorder(),
         threads=ThreadRecorder(),
         project_root=tmp_path,
         start_turn=start_turn,
     )
     context.start_calls = start_calls
+    context.command_registry = command_registry
+    context.next_handle_events = []
     return context
 
 
@@ -294,7 +329,7 @@ def test_service_capabilities_reports_tui_coverage(tmp_path: Path) -> None:
             assert by_id["threads"]["status"] == "available"
             assert by_id["composer"]["status"] == "available"
             assert by_id["models"]["status"] == "unavailable"
-            assert by_id["mcp"]["status"] == "unavailable"
+            assert by_id["commands"]["status"] == "unavailable"
         finally:
             service.stop()
 
@@ -307,7 +342,7 @@ def test_service_capabilities_uses_core_agent_summary(tmp_path: Path) -> None:
             "default_level": "medium",
             "levels": [{"id": "medium", "model": "gpt-5", "provider": "openai"}],
         },
-        picker_summary=lambda picker_ids, **_kwargs: {
+        picker_summary=lambda picker_ids=None, **_kwargs: {
             "mcp": {"available": True, "items": [{"value": "@mcp:demo"}], "total": 1},
             "skills": {"available": True, "items": [{"value": "@skill://user/demo"}], "total": 1},
         },
@@ -320,9 +355,53 @@ def test_service_capabilities_uses_core_agent_summary(tmp_path: Path) -> None:
 
             by_id = {item["id"]: item for item in capabilities["tui_features"]}
             assert by_id["models"]["status"] == "available"
-            assert by_id["mcp"]["status"] == "available"
-            assert by_id["skills"]["status"] == "available"
             assert capabilities["core"]["models"]["levels"][0]["model"] == "gpt-5"
+            assert capabilities["core"]["pickers"]["mcp"]["available"] is True
+        finally:
+            service.stop()
+
+
+def test_service_lists_and_runs_registered_commands(tmp_path: Path) -> None:
+    context = make_context(tmp_path)
+
+    def command_handler(payload):
+        assert payload["arg"] == "demo"
+        return CommandResult(
+            (
+                SetComposerAction("/demo filled"),
+                TranscriptAction("event", "command ok", {"source": "test"}),
+            )
+        )
+
+    context.command_registry.add(
+        CommandSpec(
+            name="/demo",
+            plugin="demo-plugin",
+            handler=command_handler,
+            description={"zh": "演示命令", "en": "Demo command"},
+            aliases=("/d",),
+        )
+    )
+
+    with LoopThread() as loop:
+        service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
+        service.start()
+        try:
+            listed = read_json(f"{service.url}/api/commands")
+            assert listed["available"] is True
+            assert listed["commands"][0]["name"] == "/demo"
+            assert listed["commands"][0]["description"] == "演示命令"
+
+            result = read_json(
+                f"{service.url}/api/commands/run",
+                data=json.dumps({"name": "/demo", "arg": "demo"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            assert result["actions"] == [
+                {"type": "set_composer", "text": "/demo filled"},
+                {"type": "transcript", "kind": "event", "text": "command ok", "metadata": {"source": "test"}},
+            ]
         finally:
             service.stop()
 
@@ -406,6 +485,44 @@ def test_service_submit_multipart_uploads_attachments_and_starts_turn(tmp_path: 
             assert call["text"] == payload["text"]
             assert call["attachments"][0]["blob_id"] == "blob:sha256:1"
             assert call["attachments"][1]["slot"] == 1
+        finally:
+            service.stop()
+
+
+def test_service_forwards_live_turn_events_to_sse_ring(tmp_path: Path) -> None:
+    context = make_context(tmp_path)
+    context.next_handle_events = [
+        {"type": "turn.started", "turn_id": "turn_1"},
+        {"type": "tool.output", "turn_id": "turn_1", "output": "python ok"},
+        {"type": "turn.completed", "turn_id": "turn_1"},
+    ]
+
+    with LoopThread() as loop:
+        service = RemoteControlService(loopback_config(auth_mode="none"), context=context, loop=loop)
+        service.start()
+        try:
+            result = read_json(
+                f"{service.url}/api/turns",
+                data=json.dumps({"thread_id": "thr_1", "text": "run"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            assert result["request_id"] == "req_1"
+
+            deadline = time.time() + 2.0
+            events = []
+            while time.time() < deadline:
+                replay, ok = service.events.replay_after(0)
+                assert ok is True
+                events = [item.payload for item in replay]
+                if sum(1 for item in events if item.get("kind") == "live_event") >= 3:
+                    break
+                time.sleep(0.02)
+
+            live = [item["event"] for item in events if item.get("kind") == "live_event"]
+            assert [item["type"] for item in live] == ["turn.started", "tool.output", "turn.completed"]
+            assert all(item["thread_id"] == "thr_1" for item in live)
+            assert all(item["request_id"] == "req_1" for item in live)
         finally:
             service.stop()
 

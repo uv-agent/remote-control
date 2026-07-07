@@ -2,13 +2,11 @@ import React, { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState }
 import { createRoot } from "react-dom/client";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Select from "@radix-ui/react-select";
-import * as Tabs from "@radix-ui/react-tabs";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Activity,
-  AtSign,
+  Check,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -21,16 +19,13 @@ import {
   Paperclip,
   Pencil,
   Plus,
-  Radio,
   RefreshCw,
   Search,
   Send,
   Settings,
-  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   SunMoon,
-  UploadCloud,
   Workflow,
   X,
 } from "lucide-react";
@@ -41,19 +36,13 @@ import { CONFLICT_OPTIONS, SELECT_DEFAULT_VALUE, SUPPORTED_IMAGE_TYPES, THREAD_F
 import { useLocalNumber, useLocalString, useMedia } from "./hooks";
 import { InfoPane } from "./components/InfoPane";
 import type {
-  ActivityDigest,
-  ActivityEntry,
   AttachmentDraft,
-  CapabilityFeature,
+  CommandItemSummary,
   DisplayItem,
   DisplayMessage,
   EventFilter,
   InfoTab,
   Json,
-  MaterialEntry,
-  ModelLevelSummary,
-  PickerItemSummary,
-  PickerSummary,
   ProjectInfo,
   RemoteCapabilities,
   RemoteConfig,
@@ -65,19 +54,11 @@ import type {
   TurnGroupModel,
 } from "./types";
 import {
-  activityDigest,
-  activityDigestBody,
-  activityDigestTitle,
-  activityEntryForEvent,
   appendComposerToken,
   assistantDeltaText,
   assistantTextForEvent,
   autoSize,
   attachmentEvents,
-  capabilityDetail,
-  capabilityRow,
-  capabilityStatus,
-  capabilitySummary,
   compareThreads,
   compactText,
   conflictLabel,
@@ -89,15 +70,11 @@ import {
   displayEventTime,
   displayItemForEvent,
   errorMessage,
-  eventCategory,
-  eventLabel,
-  eventSummary,
   eventTimeLabel,
   eventTurnKey,
   filterThreads,
   formatBytes,
   formatRelativeTime,
-  formatShortDuration,
   groupDisplayItems,
   isAssistantDeltaEvent,
   isAssistantFinalEvent,
@@ -106,21 +83,17 @@ import {
   isProductEvent,
   isUserDisplayEvent,
   levelLabel,
-  materialEntries,
-  materialSummaryText,
-  mentionItems,
   mergeEventsMap,
+  modelLevelDisplayLabel,
   modelLevelOptions,
   normalizeThreadFilter,
   needsSpaceBefore,
-  pickerItemTitle,
   positiveNumber,
   previewText,
   processDigestSummary,
   processWorkLabel,
   projectUpdatedAt,
   removeFirstToken,
-  runtimeSummary,
   shouldFoldText,
   statusForThread,
   stripMarkdownMarkers,
@@ -129,16 +102,15 @@ import {
   threadCardMeta,
   threadRunDetail,
   threadRunTitle,
-  toolIndexSummary,
   toolOutputText,
   uniqueFileToken,
-  uploadLimitText,
   userTextForEvent,
   composerFocusDetail,
   composerHint,
   composerPlaceholder,
   composerStateLabel,
   composerTitle,
+  commandInsertText,
   foldLabel,
 } from "./view-model";
 
@@ -165,7 +137,7 @@ function App() {
   const [theme, setTheme] = useLocalString("uvrc:theme", "deep");
   const [view, setView] = useState<"list" | "thread" | "info">("list");
   const [infoOpen, setInfoOpen] = useState(false);
-  const [infoTab, setInfoTab] = useState<InfoTab>("overview");
+  const [infoTab, setInfoTab] = useState<InfoTab>("details");
   const [eventFilter, setEventFilter] = useState<EventFilter>("all");
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -187,6 +159,8 @@ function App() {
   const desktop = useMedia("(min-width: 860px)");
   const currentThread = threads.find((thread) => thread.thread_id === selectedThreadId) || null;
   const selectedEvents = selectedThreadId ? eventsByThread.get(selectedThreadId) || [] : [];
+  const selectedLiveEvents = selectedThreadId ? liveEvents.filter((event) => event.thread_id === selectedThreadId) : [];
+  const pluginCommands = capabilities?.core?.commands?.commands || [];
   const filteredThreads = useMemo(() => filterThreads(threads, searchQuery, normalizedThreadFilter, eventsByThread, liveEvents), [threads, searchQuery, normalizedThreadFilter, eventsByThread, liveEvents]);
   const threadFilterCounts = useMemo(() => countThreadsByFilter(threads, eventsByThread, liveEvents), [threads, eventsByThread, liveEvents]);
   const runningCount = threads.filter((thread) => statusForThread(thread, eventsByThread, liveEvents).className === "running").length;
@@ -228,16 +202,6 @@ function App() {
         event.preventDefault();
         setSearchOpen(false);
         return;
-      }
-      if (!(event.ctrlKey || event.metaKey)) return;
-      if (key === "k") {
-        event.preventDefault();
-        setSearchOpen(true);
-        return;
-      }
-      if (key === "n") {
-        event.preventDefault();
-        startNewThread();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -652,6 +616,7 @@ function App() {
         currentThread={currentThread}
         composerText={composerText}
         attachmentCount={attachments.length}
+        commands={pluginCommands}
         startNewThread={startNewThread}
         selectThread={(threadId) => void selectThread(threadId)}
         openInfoTab={openInfoTab}
@@ -708,6 +673,7 @@ function App() {
             config={config}
             capabilities={capabilities}
             events={selectedEvents}
+            liveEvents={selectedLiveEvents}
             attachments={attachments}
             infoTab={infoTab}
             setInfoTab={openInfoTab}
@@ -862,7 +828,7 @@ function MobileHome(props: ShellProps) {
           <IconButton title={props.treeCollapsed ? "展开工作区" : "收起全部工作区"} onClick={() => props.setTreeCollapsed((value) => !value)}>
             <PanelLeftClose />
           </IconButton>
-          <IconButton title="运行面板" onClick={() => props.openInfoTab("status")}>
+          <IconButton title="详情" onClick={() => props.openInfoTab("details")}>
             <SlidersHorizontal />
           </IconButton>
           <IconButton title="刷新工作区和任务" onClick={() => void props.refreshAll()}>
@@ -911,9 +877,9 @@ function DesktopRail(props: ShellProps) {
         <button className="nav-arrow" type="button"><ChevronRight size={17} /></button>
       </div>
       <div className="command-stack">
-        <CommandButton icon={<Plus size={15} />} label="新建任务" meta="Ctrl+N" onClick={props.startNewThread} />
-        <CommandButton icon={<Search size={15} />} label="搜索" meta="Ctrl+K" onClick={props.openSearch} />
-        <CapabilityMenu capabilities={props.capabilities} openStatus={() => props.openInfoTab("status")} />
+        <CommandButton icon={<Plus size={15} />} label="新建任务" onClick={props.startNewThread} />
+        <CommandButton icon={<Search size={15} />} label="命令" onClick={props.openSearch} />
+        <CommandButton icon={<Settings size={15} />} label="详情" onClick={() => props.openInfoTab("details")} />
       </div>
       <section className="project-tree">
         <div className="section-pill-row">
@@ -957,7 +923,7 @@ function DesktopRail(props: ShellProps) {
         <IconButton title={props.theme === "light" ? "切换到深色主题" : "切换到浅色主题"} onClick={props.toggleTheme}>
           {props.theme === "light" ? <Moon /> : <SunMoon />}
         </IconButton>
-        <IconButton title="运行" onClick={() => props.openInfoTab("status")}><Settings /></IconButton>
+        <IconButton title="详情" onClick={() => props.openInfoTab("details")}><Settings /></IconButton>
       </footer>
     </section>
   );
@@ -1010,7 +976,6 @@ function ThreadPane(props: {
 }) {
   const rows = renderRows(props);
   const level = props.thread?.active_level || props.selectedLevel || "";
-  const levelOptions = modelLevelOptions(props.capabilities, props.selectedLevel);
   const draftReady = Boolean(props.composerText.trim() || props.attachments.length);
   const metaItems = threadMetaItems(props.project, props.thread, level);
   const showRunStrip = props.status.className === "running" || props.status.className === "error";
@@ -1079,7 +1044,7 @@ function ThreadPane(props: {
             )}
             <IconButton title="重命名" className="title-edit" onClick={props.startEditingTitle}><Pencil /></IconButton>
           </div>
-          <div className="thread-meta-trail" aria-label="任务上下文">
+          <div className="thread-meta-trail" aria-label="任务信息">
             {metaItems.map((item) => (
               <span className={clsx("thread-meta-chip", item.kind)} key={`${item.kind}-${item.label}`}>
                 {item.icon}
@@ -1096,15 +1061,15 @@ function ThreadPane(props: {
       {showRunStrip && (
         <>
           <div className="thread-floating-status" aria-hidden="false">
-            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("events")} />
+            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("details")} />
           </div>
           <div className="mobile-status-ribbon">
-            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("events")} />
+            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("details")} />
           </div>
         </>
       )}
       <section id="timeline" className="timeline">
-        {rows.length ? rows : <div className="timeline-empty">{props.thread ? "暂无活动" : "暂无任务"}</div>}
+        {rows.length ? rows : <div className="timeline-empty">{props.thread ? "暂无记录" : "暂无任务"}</div>}
       </section>
       <form className="composer" onSubmit={props.submitComposer}>
         <div
@@ -1114,7 +1079,7 @@ function ThreadPane(props: {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {dragActive && <div className="composer-drop-hint">松开添加到本轮上下文</div>}
+          {dragActive && <div className="composer-drop-hint">松开添加到本轮附件</div>}
           <div className="composer-topline">
             <span className="composer-focus">
               <Workflow size={15} />
@@ -1153,25 +1118,17 @@ function ThreadPane(props: {
           />
           <div className="composer-actions">
             <div className="composer-tools">
-              <label className="tool-btn attach-tool" title="添加上下文" aria-label="添加上下文">
-                <input id="fileInput" ref={props.fileInputRef} type="file" multiple onChange={(event) => {
-                  props.addSelectedFiles(event.currentTarget.files);
-                  event.currentTarget.value = "";
-                }} />
-                <Paperclip size={16} />
-              </label>
-              <MentionMenu
+              <input id="fileInput" ref={props.fileInputRef} type="file" multiple onChange={(event) => {
+                props.addSelectedFiles(event.currentTarget.files);
+                event.currentTarget.value = "";
+              }} />
+              <ComposerActionMenu
                 capabilities={props.capabilities}
-                insertMention={(token) => {
-                  const next = appendComposerToken(props.composerText, token);
-                  props.setComposerText(next);
-                  requestAnimationFrame(() => {
-                    props.composerRef.current?.focus();
-                    autoSize(props.composerRef.current);
-                  });
-                }}
+                selectedLevel={props.selectedLevel}
+                setSelectedLevel={props.setSelectedLevel}
+                addAttachment={() => props.fileInputRef.current?.click()}
+                openCommands={props.openSearch}
               />
-              <ComposerMenuControl label="档位" value={props.selectedLevel} options={levelOptions} onChange={props.setSelectedLevel} />
               <ComposerMenuControl label="策略" value={props.selectedConflict} options={CONFLICT_OPTIONS} onChange={props.setSelectedConflict} />
             </div>
             <div className="composer-submit">
@@ -1184,49 +1141,74 @@ function ThreadPane(props: {
   );
 }
 
-function MentionMenu({ capabilities, insertMention }: { capabilities: RemoteCapabilities | null; insertMention: (token: string) => void }) {
-  const groups = mentionGroups(capabilities);
-  const hasItems = groups.some((group) => group.items.length);
+function ComposerActionMenu({
+  capabilities,
+  selectedLevel,
+  setSelectedLevel,
+  addAttachment,
+  openCommands,
+}: {
+  capabilities: RemoteCapabilities | null;
+  selectedLevel: string;
+  setSelectedLevel: (value: string) => void;
+  addAttachment: () => void;
+  openCommands: () => void;
+}) {
+  const levelOptions = modelLevelOptions(capabilities, selectedLevel);
+  const selected = selectedLevel || SELECT_DEFAULT_VALUE;
+  const selectedLabel = modelLevelDisplayLabel(selectedLevel || capabilities?.core?.models?.default_level || "");
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="tool-btn mention-tool" type="button" title="引用上下文" aria-label="引用上下文">
-          <AtSign size={16} />
+        <button className="tool-btn plus-tool" type="button" title="添加功能" aria-label="添加功能">
+          <Plus size={17} />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="dropdown-panel mention-menu-panel" sideOffset={8} align="start">
-          <DropdownMenu.Label className="dropdown-label">引用上下文</DropdownMenu.Label>
-          {hasItems ? groups.map((group) => (
-            <React.Fragment key={group.key}>
-              <DropdownMenu.Label className="mention-menu-group">{group.label}</DropdownMenu.Label>
-              {group.items.map((item) => (
-                <DropdownMenu.Item
-                  className="dropdown-item mention-menu-item"
-                  key={`${group.key}-${item.value || item.id || item.description}`}
-                  onSelect={() => item.value && insertMention(item.value)}
-                >
-                  <span className="mention-menu-icon">{group.icon}</span>
-                  <span className="mention-menu-main">
-                    <strong>{pickerItemTitle(item)}</strong>
-                    <small>{item.description || item.meta || item.value}</small>
-                  </span>
-                </DropdownMenu.Item>
-              ))}
-            </React.Fragment>
-          )) : (
-            <DropdownMenu.Item className="dropdown-item mention-menu-item muted">
-              <span className="mention-menu-icon"><AtSign size={14} /></span>
-              <span className="mention-menu-main">
-                <strong>暂无引用源</strong>
-                <small>启用 MCP 或 Skills 后会出现在这里</small>
-              </span>
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Separator className="dropdown-separator" />
-          <DropdownMenu.Item className="dropdown-item compact" disabled={!hasItems}>
-            {hasItems ? "选择后会插入到输入框" : "状态页可查看服务状态"}
+        <DropdownMenu.Content className="dropdown-panel composer-action-panel" sideOffset={8} align="start">
+          <DropdownMenu.Item className="dropdown-item composer-action-item" onSelect={addAttachment}>
+            <span className="composer-action-icon"><Paperclip size={15} /></span>
+            <span className="composer-action-main">
+              <strong>附件</strong>
+              <small>添加图片或文件</small>
+            </span>
           </DropdownMenu.Item>
+          <DropdownMenu.Item className="dropdown-item composer-action-item" onSelect={openCommands}>
+            <span className="composer-action-icon"><Search size={15} /></span>
+            <span className="composer-action-main">
+              <strong>命令</strong>
+              <small>打开命令面板</small>
+            </span>
+          </DropdownMenu.Item>
+          <DropdownMenu.Sub>
+            <DropdownMenu.SubTrigger className="dropdown-item composer-action-item">
+              <span className="composer-action-icon"><Sparkles size={15} /></span>
+              <span className="composer-action-main">
+                <strong>模型/档位</strong>
+                <small>{selectedLabel}</small>
+              </span>
+              <span className="composer-action-arrow" aria-hidden="true">›</span>
+            </DropdownMenu.SubTrigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.SubContent className="dropdown-panel composer-sub-panel" sideOffset={8} alignOffset={-6}>
+                <DropdownMenu.Label className="dropdown-label">选择模型档位</DropdownMenu.Label>
+                {levelOptions.map((option) => {
+                  const optionValue = option.value || SELECT_DEFAULT_VALUE;
+                  const checked = optionValue === selected;
+                  return (
+                    <DropdownMenu.Item
+                      className="dropdown-item model-menu-item"
+                      key={`level-${optionValue}`}
+                      onSelect={() => setSelectedLevel(option.value)}
+                    >
+                      <span className="model-menu-check">{checked && <Check size={14} />}</span>
+                      <span className="model-menu-main">{option.label}</span>
+                    </DropdownMenu.Item>
+                  );
+                })}
+              </DropdownMenu.SubContent>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Sub>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -1353,7 +1335,7 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
             ))}
             {!!processItems.length && (
               <motion.div layout className="turn-motion-item" key={`process-${group.key}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.16, ease: "easeOut" }}>
-                <ProcessDigest items={processItems} openEvents={() => props.openInfoTab("events")} />
+                <ProcessDigest items={processItems} openEvents={() => props.openInfoTab("details")} />
               </motion.div>
             )}
             {resultItems.map((item) => (
@@ -1414,7 +1396,7 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
   openEvents: () => void;
 }) {
   const detail = threadRunDetail(thread, status, level);
-  const action = "查看活动";
+  const action = "查看详情";
   return (
     <button className={clsx("thread-run-strip", status.className)} type="button" title={action} aria-label={`${threadRunTitle(thread, status)} ${detail}，${action}`} onClick={openEvents}>
       <span className="run-dot" />
@@ -1617,6 +1599,7 @@ function CommandPalette({
   currentThread,
   composerText,
   attachmentCount,
+  commands,
   startNewThread,
   selectThread,
   openInfoTab,
@@ -1633,6 +1616,7 @@ function CommandPalette({
   currentThread: Thread | null;
   composerText: string;
   attachmentCount: number;
+  commands: CommandItemSummary[];
   startNewThread: () => void;
   selectThread: (threadId: string) => void;
   openInfoTab: (tab: InfoTab) => void;
@@ -1651,11 +1635,19 @@ function CommandPalette({
     action();
   };
   const currentTitle = currentThread?.title || "当前任务";
+  const insertCommand = (command: CommandItemSummary) => {
+    const token = commandInsertText(command);
+    if (!token) return;
+    run(() => {
+      setComposerText(appendComposerToken(composerText, token));
+      focusComposer();
+    });
+  };
   const commandGroups: PaletteGroup[] = [
     {
       title: "建议动作",
       rows: [
-        { title: "新建任务", meta: "Ctrl+N", keywords: "new thread 新建", action: () => run(startNewThread) },
+        { title: "新建任务", meta: "创建线程", keywords: "new thread 新建", action: () => run(startNewThread) },
         { title: currentThread ? "继续输入" : "打开输入框", meta: currentThread ? currentTitle : "草稿", keywords: "composer input 输入", action: () => run(focusComposer) },
         composerText || attachmentCount ? { title: "清空输入", meta: attachmentCount ? `${attachmentCount} 个素材` : "草稿", keywords: "clear composer 清空", action: () => run(clearComposer) } : null,
       ],
@@ -1664,10 +1656,17 @@ function CommandPalette({
       title: "任务面板",
       rows: [
         currentThread ? { title: "重命名任务", meta: currentTitle, keywords: "rename title 重命名", action: () => run(startEditingTitle) } : null,
-        { title: "查看活动", meta: "消息、工具、素材", keywords: "events activity 活动", action: () => run(() => openInfoTab("events")) },
-        { title: "查看素材", meta: "附件与待发送文件", keywords: "attachments files image 素材 附件", action: () => run(() => openInfoTab("attachments")) },
-        { title: "查看运行", meta: "远程入口", keywords: "status connection auth 连接 运行", action: () => run(() => openInfoTab("status")) },
+        { title: "查看详情", meta: "运行与附件", keywords: "details events activity status attachments 详情 运行 附件", action: () => run(() => openInfoTab("details")) },
       ],
+    },
+    {
+      title: "插件命令",
+      rows: commands.map((command) => ({
+        title: command.name || "命令",
+        meta: command.plugin || command.description || "插入到输入框",
+        keywords: `${command.name || ""} ${command.plugin || ""} ${command.description || ""} ${(command.aliases || []).join(" ")}`,
+        action: () => insertCommand(command),
+      })),
     },
     {
       title: "最近线程",
@@ -1683,7 +1682,7 @@ function CommandPalette({
   if (query && !groups.some((group) => group.rows.length)) {
     groups.unshift({
       title: "建议动作",
-      rows: [{ title: "用搜索内容创建任务", meta: "Enter", keywords: query, action: () => { run(() => { startNewThread(); setComposerText(query); }); } }],
+      rows: [{ title: "把搜索内容放入输入框", meta: "草稿", keywords: query, action: () => { run(() => { startNewThread(); setComposerText(query); }); } }],
     });
   }
   const firstRow = groups.flatMap((group) => group.rows)[0];
@@ -1693,7 +1692,7 @@ function CommandPalette({
         <header className="palette-head">
           <div>
             <h2>命令面板</h2>
-            <p>搜索任务或执行当前工作区命令</p>
+            <p>搜索任务，或把插件命令插入输入框</p>
           </div>
           <IconButton title="关闭" onClick={close}><X /></IconButton>
         </header>
@@ -1701,7 +1700,7 @@ function CommandPalette({
           ref={inputRef}
           className="palette-input"
           type="search"
-          placeholder="搜索任务、线程或命令"
+          placeholder="搜索任务或命令"
           value={query}
           onChange={(event) => setQuery(event.target.value.trim())}
           onKeyDown={(event) => {
@@ -1945,61 +1944,8 @@ function CommandButton({ icon, label, meta, onClick }: { icon: React.ReactNode; 
   );
 }
 
-function capabilityIcon(id: string) {
-  if (id === "attachments") return <Paperclip size={13} />;
-  if (id === "transcript") return <Activity size={13} />;
-  if (id === "status") return <Settings size={13} />;
-  return <Sparkles size={13} />;
+function dragCarriesFiles(event: React.DragEvent<HTMLElement>) {
+  return Array.from(event.dataTransfer.types || []).includes("Files");
 }
 
-function CapabilityMenu({ capabilities, openStatus }: { capabilities: RemoteCapabilities | null; openStatus: () => void }) {
-  const rows = capabilities?.tui_features?.map(capabilityRow) || [];
-  const available = rows.filter((row) => row.stateClass !== "muted").length;
-  const label = rows.length ? `${available}/${rows.length}` : "同步中";
-  return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button className="command-row capability-menu-trigger" type="button">
-          <span className="cmd-icon"><Sparkles size={15} /></span>
-          <span>能力</span>
-          <kbd>{label}</kbd>
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content className="dropdown-panel capability-menu-panel" sideOffset={8} align="start">
-          <DropdownMenu.Label className="dropdown-label">当前工作台能力</DropdownMenu.Label>
-          {rows.length ? rows.slice(0, 8).map((row) => (
-            <DropdownMenu.Item className="dropdown-item capability-menu-item" key={row.key} onSelect={openStatus}>
-              <span className={clsx("capability-menu-icon", row.stateClass)}>{capabilityIcon(row.key)}</span>
-              <span className="capability-menu-main">
-                <strong>{row.label}</strong>
-                <small>{row.detail}</small>
-              </span>
-              <em>{row.status}</em>
-            </DropdownMenu.Item>
-          )) : (
-            <DropdownMenu.Item className="dropdown-item capability-menu-item muted" onSelect={openStatus}>
-              <span className="capability-menu-icon muted"><Sparkles size={13} /></span>
-              <span className="capability-menu-main">
-                <strong>能力同步中</strong>
-                <small>打开状态页查看远程服务状态</small>
-              </span>
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Separator className="dropdown-separator" />
-          <DropdownMenu.Item className="dropdown-item compact" onSelect={openStatus}>查看状态详情</DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  );
-}function dragCarriesFiles(event: React.DragEvent<HTMLElement>) {
-  return Array.from(event.dataTransfer.types || []).includes("Files");
-}function mentionGroups(capabilities: RemoteCapabilities | null): Array<{ key: string; label: string; icon: React.ReactNode; items: PickerItemSummary[] }> {
-  const pickers = capabilities?.core?.pickers || {};
-  const mcpItems = mentionItems(pickers.mcp);
-  const skillItems = mentionItems(pickers.skills);
-  return [
-    { key: "mcp", label: "MCP", icon: <Workflow size={14} />, items: mcpItems },
-    { key: "skills", label: "Skills", icon: <Sparkles size={14} />, items: skillItems },
-  ].filter((group) => group.items.length || group.key === "mcp" || group.key === "skills");
-}createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+createRoot(document.getElementById("root") as HTMLElement).render(<App />);

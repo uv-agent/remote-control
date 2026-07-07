@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import mimetypes
@@ -9,6 +10,7 @@ import secrets
 import threading
 import time
 from collections import deque
+from concurrent.futures import CancelledError, Future
 from dataclasses import dataclass
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -17,7 +19,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
 
 SESSION_COOKIE = "uv_agent_remote_control_session"
@@ -160,6 +162,7 @@ class RemoteControlService:
         self._thread: threading.Thread | None = None
         self._url = ""
         self._unsubscribe = None
+        self._turn_forwarders: set[Future[Any]] = set()
 
     @property
     def url(self) -> str:
@@ -189,10 +192,9 @@ class RemoteControlService:
         host = getattr(self.context, "host", None)
         core = self.core_summary()
         models = core.get("models") if isinstance(core.get("models"), dict) else {}
-        pickers = core.get("pickers") if isinstance(core.get("pickers"), dict) else {}
         model_levels = models.get("levels") if isinstance(models.get("levels"), list) else []
-        mcp = pickers.get("mcp") if isinstance(pickers.get("mcp"), dict) else {}
-        skills = pickers.get("skills") if isinstance(pickers.get("skills"), dict) else {}
+        command_summary = core.get("commands") if isinstance(core.get("commands"), dict) else {}
+        commands = command_summary.get("commands") if isinstance(command_summary.get("commands"), list) else []
         return {
             "ok": True,
             "host": {
@@ -214,11 +216,19 @@ class RemoteControlService:
                 _feature("attachments", "附件", "available" if has_blobs and has_submit else "unavailable", "图片上下文和文件素材"),
                 _feature("status", "状态", "available", "连接状态、会话保护和远程入口"),
                 _feature("models", "模型", _model_feature_status(core, model_levels), _model_feature_detail(core, model_levels)),
-                _feature("mcp", "MCP", _picker_feature_status(core, mcp), _picker_feature_detail(core, mcp, label="MCP")),
-                _feature("skills", "技能", _picker_feature_status(core, skills), _picker_feature_detail(core, skills, label="技能")),
+                _feature("commands", "命令", "available" if commands else "unavailable", f"已同步 {len(commands)} 个命令" if commands else "等待命令注册"),
             ],
             "core": core,
         }
+
+    def commands_summary(self) -> dict[str, Any]:
+        commands = []
+        registry = _command_registry(self.context)
+        list_commands = getattr(registry, "list", None)
+        if callable(list_commands):
+            for spec in list_commands():
+                commands.append(_command_summary(spec))
+        return {"available": registry is not None, "commands": commands}
 
     def core_summary(self) -> dict[str, Any]:
         agent = getattr(self.context, "agent", None)
@@ -227,11 +237,13 @@ class RemoteControlService:
                 "agent_api": False,
                 "models": {"available": False, "default_level": "", "levels": []},
                 "pickers": {},
+                "commands": self.commands_summary(),
             }
         return {
             "agent_api": True,
             "models": _safe_call(getattr(agent, "model_levels", None), default={"available": False, "default_level": "", "levels": []}),
-            "pickers": _safe_call(getattr(agent, "picker_summary", None), ["mcp", "skills"], limit=30, default={}),
+            "pickers": _safe_call(getattr(agent, "picker_summary", None), limit=30, default={}),
+            "commands": self.commands_summary(),
         }
 
     def start(self) -> None:
@@ -268,6 +280,8 @@ class RemoteControlService:
             httpd.server_close()
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)
+        for future in list(self._turn_forwarders):
+            future.cancel()
 
     def _on_plugin_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type") or "")
@@ -321,6 +335,7 @@ class RemoteControlService:
             timeout=10.0,
         )
         request_id = str(getattr(handle, "request_id", "") or "")
+        self._schedule_turn_forwarder(handle, request_id=request_id, fallback_thread_id=thread_id)
         self.events.publish(
             {
                 "kind": "turn_submitted",
@@ -330,6 +345,76 @@ class RemoteControlService:
             }
         )
         return {"ok": True, "thread_id": thread_id, "request_id": request_id, "status": str(getattr(handle, "status", "queued"))}
+
+    def _schedule_turn_forwarder(self, handle: Any, *, request_id: str, fallback_thread_id: str) -> None:
+        events = getattr(handle, "events", None)
+        if not callable(events):
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            self._forward_turn_events(handle, request_id=request_id, fallback_thread_id=fallback_thread_id),
+            self.loop,
+        )
+        with self._lock:
+            self._turn_forwarders.add(future)
+
+        def done(completed: Future[Any]) -> None:
+            with self._lock:
+                self._turn_forwarders.discard(completed)
+            try:
+                completed.result()
+            except (asyncio.CancelledError, CancelledError):
+                return
+            except Exception:
+                self.logger.exception("Remote control turn event forwarder failed")
+
+        future.add_done_callback(done)
+
+    async def _forward_turn_events(self, handle: Any, *, request_id: str, fallback_thread_id: str) -> None:
+        async for raw_event in handle.events():
+            if not isinstance(raw_event, dict):
+                continue
+            event = dict(raw_event)
+            if request_id and not event.get("request_id"):
+                event["request_id"] = request_id
+            thread_id = str(event.get("thread_id") or getattr(handle, "thread_id", "") or fallback_thread_id or "")
+            if thread_id and not event.get("thread_id"):
+                event["thread_id"] = thread_id
+            self.events.publish({"kind": "live_event", "thread_id": thread_id, "event": event})
+
+    def run_command(self, payload: dict[str, Any]) -> dict[str, Any]:
+        registry = _command_registry(self.context)
+        get_command = getattr(registry, "get", None)
+        if not callable(get_command):
+            raise LookupError("plugin command registry is not available")
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("command name is required")
+        spec = get_command(name)
+        if spec is None:
+            raise LookupError(f"unknown command: {name}")
+        command_payload = {
+            "arg": str(payload.get("arg") or ""),
+            "thread_id": str(payload.get("thread_id") or "") or None,
+        }
+        kwargs: dict[str, Any] = {"payload": command_payload}
+        if _accepts_context(getattr(spec, "handler", None)):
+            if str(getattr(spec, "plugin", "") or "") != str(getattr(self.context, "plugin_id", "") or ""):
+                raise RuntimeError("this plugin command requires its own plugin context and cannot be executed from remote-control yet")
+            kwargs["context"] = self.context
+        result = spec.handler(**kwargs)
+        if inspect.isawaitable(result):
+            raise RuntimeError("async plugin commands cannot be executed from remote-control")
+        actions = [_command_action_payload(action) for action in tuple(getattr(result, "actions", ()) or ())]
+        return {"ok": True, "command": _command_summary(spec), "actions": actions}
+
+    def picker_summary(self, picker_id: str, *, query: str = "", limit: int = 50) -> dict[str, Any]:
+        agent = getattr(self.context, "agent", None)
+        picker_summary = getattr(agent, "picker_summary", None)
+        if not callable(picker_summary):
+            return {"ok": True, "picker": {"available": False, "items": []}}
+        data = picker_summary([picker_id], query=query, limit=limit)
+        picker = data.get(picker_id) if isinstance(data, dict) else None
+        return {"ok": True, "picker": picker or {"available": False, "items": []}}
 
     def _prepare_attachments(self, text: str, attachments_meta: list[Any], files: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         prepared: list[dict[str, Any]] = []
@@ -383,6 +468,12 @@ class RemoteControlService:
         class RemoteControlRequestHandler(BaseHTTPRequestHandler):
             server_version = "UvAgentRemoteControl/1"
 
+            def handle(self) -> None:
+                try:
+                    super().handle()
+                except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                    return
+
             def do_GET(self) -> None:  # noqa: N802
                 self._guard(self._handle_get)
 
@@ -426,8 +517,17 @@ class RemoteControlService:
                     if parsed.path == "/api/capabilities":
                         self._send_json(service.capabilities())
                         return
+                    if parsed.path == "/api/commands":
+                        self._send_json({"ok": True, **service.commands_summary()})
+                        return
                     if parsed.path == "/api/environment":
                         self._send_json({"ok": True, "core": service.core_summary(), "remote": service.status(), "project": self._project_info()})
+                        return
+                    if parsed.path.startswith("/api/pickers/"):
+                        picker_id = parsed.path[len("/api/pickers/") :].strip("/")
+                        params = parse_qs(parsed.query, keep_blank_values=True)
+                        query = str(params.get("query", [""])[0] or "")
+                        self._send_json(service.picker_summary(picker_id, query=query))
                         return
                     if parsed.path == "/api/threads":
                         self._send_json({"ok": True, "project": self._project_info(), "threads": service.context.threads.list_threads()})
@@ -483,6 +583,9 @@ class RemoteControlService:
                 if parsed.path == "/api/turns":
                     payload, files = self._read_payload_and_files()
                     self._send_json(service._submit_turn(payload, files))
+                    return
+                if parsed.path == "/api/commands/run":
+                    self._send_json(service.run_command(self._read_json()))
                     return
                 thread_id, suffix = _thread_route(parsed.path)
                 if thread_id and suffix == "/submit":
@@ -670,6 +773,67 @@ def _parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, Any], di
         mime_type = part.get_content_type() or mimetypes.guess_type(filename)[0] or "application/octet-stream"
         files[name] = {"filename": filename, "mime_type": mime_type, "data": data}
     return payload, files
+
+
+def _command_registry(context) -> Any:
+    commands = getattr(context, "commands", None)
+    return getattr(commands, "_registry", None)
+
+
+def _command_summary(spec: Any) -> dict[str, Any]:
+    return {
+        "name": str(getattr(spec, "name", "") or ""),
+        "plugin": str(getattr(spec, "plugin", "") or ""),
+        "description": _localized_text(getattr(spec, "description", "") or ""),
+        "aliases": [str(alias) for alias in tuple(getattr(spec, "aliases", ()) or ())],
+    }
+
+
+def _command_action_payload(action: Any) -> dict[str, Any]:
+    kind = str(getattr(action, "kind", "") or "")
+    if kind in {"event", "error"}:
+        metadata = getattr(action, "metadata", None)
+        return {
+            "type": "transcript",
+            "kind": kind,
+            "text": str(getattr(action, "text", "") or ""),
+            "metadata": metadata if _json_safe(metadata) else {},
+        }
+    if action.__class__.__name__ == "SetComposerAction" or (hasattr(action, "text") and not kind):
+        return {"type": "set_composer", "text": str(getattr(action, "text", "") or "")}
+    picker_id = str(getattr(action, "picker_id", "") or "")
+    if picker_id:
+        return {"type": "open_picker", "picker_id": picker_id, "query": str(getattr(action, "query", "") or "")}
+    return {"type": "unknown", "class_name": action.__class__.__name__}
+
+
+def _accepts_context(fn: Any) -> bool:
+    if not callable(fn):
+        return False
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == "context":
+            return True
+    return False
+
+
+def _localized_text(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get("zh") or value.get("en") or next(iter(value.values()), "") or "")
+    return str(value or "")
+
+
+def _json_safe(value: Any) -> bool:
+    try:
+        json.dumps(value)
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def _thread_route(path: str) -> tuple[str | None, str]:

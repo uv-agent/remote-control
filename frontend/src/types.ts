@@ -37,6 +37,7 @@ export type CoreSummary = {
   agent_api?: boolean;
   models?: ModelSummary;
   pickers?: Record<string, PickerSummary>;
+  commands?: CommandSummary;
 };
 
 export type ModelSummary = {
@@ -75,6 +76,18 @@ export type PickerItemSummary = {
   description?: string;
   kind?: string;
   meta?: string;
+};
+
+export type CommandSummary = {
+  available?: boolean;
+  commands?: CommandItemSummary[];
+};
+
+export type CommandItemSummary = {
+  name?: string;
+  plugin?: string;
+  description?: string;
+  aliases?: string[];
 };
 
 export type Thread = {
@@ -127,7 +140,7 @@ export type Status = {
   className: "running" | "done" | "error" | "muted";
 };
 
-export type InfoTab = "overview" | "events" | "attachments" | "status";
+export type InfoTab = "details" | "overview" | "events" | "attachments" | "status";
 export type EventFilter = "all" | "message" | "tool" | "system" | "attachment";
 export type ThemeName = "deep" | "light";
 export type ThreadFilter = "all" | "running" | "done" | "attention";
