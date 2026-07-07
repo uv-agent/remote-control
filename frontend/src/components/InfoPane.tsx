@@ -233,17 +233,16 @@ function PluginEntriesSection({ capabilities }: { capabilities: RemoteCapabiliti
 
 function DetailSection({ title, icon, count, children }: { title: string; icon: React.ReactNode; count: string; children: React.ReactNode }) {
   return (
-    <details className="detail-section">
-      <summary>
+    <section className="detail-section">
+      <header className="detail-section-head">
         <span className="detail-section-icon">{icon}</span>
         <span className="detail-section-main">
           <strong>{title}</strong>
           <small>{count}</small>
         </span>
-        <span className="detail-section-arrow" aria-hidden="true" />
-      </summary>
+      </header>
       <div className="detail-section-body">{children}</div>
-    </details>
+    </section>
   );
 }
 

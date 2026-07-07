@@ -2272,46 +2272,12 @@ body[data-connection="error"] .connection-dot {
   padding: 8px 10px;
 }
 
-.process-digest-row {
-  display: grid;
+.process-digest-item {
   min-width: 0;
-  gap: 2px;
-  padding: 2px 0;
 }
 
-.process-digest-row strong,
-.process-digest-row small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.process-digest-row strong {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 16px;
-}
-
-.process-digest-row small {
-  color: var(--faint);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.process-digest-more {
-  justify-self: start;
-  border-radius: 7px;
-  padding: 4px 8px;
-  background: var(--paper-wash);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.process-digest-more:hover {
-  background: var(--hover);
-  color: var(--text);
+.process-digest-item > * {
+  width: 100%;
 }
 
 .context-line {
@@ -3235,25 +3201,19 @@ body[data-connection="error"] .connection-dot {
 .detail-section {
   display: grid;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--paper-wash);
 }
 
-.detail-section summary {
+.detail-section-head {
   display: grid;
   min-height: 46px;
-  grid-template-columns: 28px minmax(0, 1fr) 18px;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   padding: 8px 10px;
-  cursor: pointer;
-  list-style: none;
-}
-
-.detail-section summary::-webkit-details-marker {
-  display: none;
 }
 
 .detail-section-icon {
@@ -3297,26 +3257,10 @@ body[data-connection="error"] .connection-dot {
   line-height: 16px;
 }
 
-.detail-section-arrow {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  color: var(--faint);
-  transition: transform 120ms ease;
-}
-
-.detail-section-arrow::before {
-  content: "›";
-}
-
-.detail-section[open] .detail-section-arrow {
-  transform: rotate(90deg);
-}
-
 .detail-section-body {
   display: grid;
   min-width: 0;
+  overflow: visible;
   gap: 8px;
   border-top: 1px solid var(--line-soft);
   padding: 10px;

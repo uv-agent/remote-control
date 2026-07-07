@@ -925,7 +925,6 @@ function DesktopRail(props: ShellProps) {
         <IconButton title={props.theme === "light" ? "切换到深色主题" : "切换到浅色主题"} onClick={props.toggleTheme}>
           {props.theme === "light" ? <Moon /> : <SunMoon />}
         </IconButton>
-        <IconButton title="详情" onClick={() => props.openInfoTab("details")}><Settings /></IconButton>
       </footer>
     </section>
   );
@@ -1058,7 +1057,6 @@ function ThreadPane(props: {
         </div>
         <div className="thread-actions">
           <IconButton title="搜索" onClick={props.openSearch}><Search /></IconButton>
-          <IconButton title="信息" onClick={props.openInfo}><Info /></IconButton>
         </div>
       </header>
       {showRunStrip && (
@@ -1375,7 +1373,7 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
             ))}
             {!!processItems.length && (
               <motion.div layout className="turn-motion-item" key={`process-${group.key}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.16, ease: "easeOut" }}>
-                <ProcessDigest items={processItems} openEvents={() => props.openInfoTab("details")} />
+                <ProcessDigest items={processItems} props={props} />
               </motion.div>
             )}
             {resultItems.map((item) => (
@@ -1396,11 +1394,11 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
       )}
     </motion.section>
   );
-}function ProcessDigest({ items, openEvents }: { items: DisplayItem[]; openEvents: () => void }) {
-  const toolCount = items.filter((item) => item.kind === "message" && item.role === "tool").length;
-  const reasoningCount = items.filter((item) => item.kind === "message" && item.role === "reasoning").length;
-  const previewItems = items.filter((item): item is DisplayMessage => item.kind === "message").slice(-5);
-  const workLabel = processWorkLabel(previewItems);
+}function ProcessDigest({ items, props }: { items: DisplayItem[]; props: React.ComponentProps<typeof ThreadPane> }) {
+  const processMessages = items.filter((item): item is DisplayMessage => item.kind === "message");
+  const toolCount = processMessages.filter((item) => item.role === "tool").length;
+  const reasoningCount = processMessages.filter((item) => item.role === "reasoning").length;
+  const workLabel = processWorkLabel(processMessages);
   const summary = processDigestSummary(toolCount, reasoningCount);
   return (
     <details className="process-digest">
@@ -1414,13 +1412,11 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
         <span className="process-digest-arrow" aria-hidden="true" />
       </summary>
       <div className="process-digest-list">
-        {previewItems.map((item) => (
-          <span className="process-digest-row" key={item.key}>
-            <strong>{foldLabel(item)}</strong>
-            <small>{previewText(item.text, 120) || "暂无内容"}</small>
-          </span>
+        {processMessages.map((item) => (
+          <div className="process-digest-item" key={item.key}>
+            {renderDisplayItem(item, props)}
+          </div>
         ))}
-        <button type="button" className="process-digest-more" onClick={openEvents}>查看完整进展</button>
       </div>
     </details>
   );
