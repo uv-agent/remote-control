@@ -155,7 +155,7 @@ export function threadRunDetail(thread: Thread | null, status: Status, level: st
   const model = thread.active_model || "模型未指定";
   const levelText = level ? levelLabel(level) : "默认档位";
   if (status.className === "running") return `${model} · ${levelText}`;
-  if (status.className === "error") return "打开详情查看原因";
+  if (status.className === "error") return "展开进展查看原因";
   if (status.label === "已停止") return "可以继续输入";
   const updated = thread.updated_at ? ` · 更新于 ${formatRelativeTime(thread.updated_at)}` : "";
   return `${model}${updated}`;
@@ -431,7 +431,7 @@ export function activityEntryForEvent(event: TimelineEvent, index: number): Acti
       key,
       category,
       title: "执行完成",
-      body: name ? `${name} 已返回结果` : "执行结果已同步到任务详情",
+      body: name ? `${name} 已返回结果` : "执行结果已同步到会话",
       meta: eventTimeLabel(event),
     };
   }

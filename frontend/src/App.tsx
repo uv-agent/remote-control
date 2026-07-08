@@ -12,7 +12,6 @@ import {
   Copy,
   FilePlus2,
   Folder,
-  Info,
   Image as ImageIcon,
   Moon,
   PanelLeftClose,
@@ -40,8 +39,6 @@ import type {
   CommandItemSummary,
   DisplayItem,
   DisplayMessage,
-  EventFilter,
-  InfoTab,
   Json,
   ProjectInfo,
   RemoteCapabilities,
@@ -138,8 +135,6 @@ function App() {
   const [theme, setTheme] = useLocalString("uvrc:theme", "deep");
   const [view, setView] = useState<"list" | "thread" | "info">("list");
   const [infoOpen, setInfoOpen] = useState(false);
-  const [infoTab, setInfoTab] = useState<InfoTab>("details");
-  const [eventFilter, setEventFilter] = useState<EventFilter>("all");
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -448,21 +443,12 @@ function App() {
     setView("thread");
   }
 
-  function openInfoTab(tab: InfoTab) {
-    setInfoTab(tab);
+  function openInfoPane() {
     if (desktop) {
       setInfoOpen(true);
     } else {
       setView("info");
     }
-  }
-
-  function toggleInfoPane() {
-    if (!desktop) {
-      setView("info");
-      return;
-    }
-    setInfoOpen((value) => !value);
   }
 
   function closeInfoPane() {
@@ -597,7 +583,7 @@ function App() {
     },
     treeCollapsed,
     setTreeCollapsed,
-    openInfoTab,
+    openInfoPane,
   };
 
   if (authenticated === null) return <SessionGate mode="loading" />;
@@ -620,7 +606,7 @@ function App() {
         commands={pluginCommands}
         startNewThread={startNewThread}
         selectThread={(threadId) => void selectThread(threadId)}
-        openInfoTab={openInfoTab}
+        openInfoPane={openInfoPane}
         setComposerText={setComposerText}
         focusComposer={focusComposer}
         clearComposer={clearComposer}
@@ -657,8 +643,6 @@ function App() {
               sendBusy={sendBusy}
               backToList={() => setView("list")}
               openSearch={() => setSearchOpen(true)}
-              openInfo={() => toggleInfoPane()}
-              openInfoTab={openInfoTab}
               copyText={copyText}
               desktop={desktop}
               editingTitle={editingTitle}
@@ -672,20 +656,11 @@ function App() {
           <InfoPane
             thread={currentThread}
             project={project}
-            config={config}
             capabilities={capabilities}
             events={selectedEvents}
             liveEvents={selectedLiveEvents}
             attachments={attachments}
-            infoTab={infoTab}
-            setInfoTab={openInfoTab}
-            eventFilter={eventFilter}
-            setEventFilter={setEventFilter}
             close={closeInfoPane}
-            db={db}
-            lastSeq={lastSeq}
-            connection={connection}
-            runningCount={runningCount}
             status={currentStatus}
           />
         </div>
@@ -791,7 +766,7 @@ type ShellProps = {
   selectFirstThread: () => void;
   treeCollapsed: boolean;
   setTreeCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  openInfoTab: (tab: InfoTab) => void;
+  openInfoPane: () => void;
 };
 
 function MobileHome(props: ShellProps) {
@@ -830,7 +805,7 @@ function MobileHome(props: ShellProps) {
           <IconButton title={props.treeCollapsed ? "展开工作区" : "收起全部工作区"} onClick={() => props.setTreeCollapsed((value) => !value)}>
             <PanelLeftClose />
           </IconButton>
-          <IconButton title="详情" onClick={() => props.openInfoTab("details")}>
+          <IconButton title="详情" onClick={props.openInfoPane}>
             <SlidersHorizontal />
           </IconButton>
           <IconButton title="刷新工作区和任务" onClick={() => void props.refreshAll()}>
@@ -881,7 +856,7 @@ function DesktopRail(props: ShellProps) {
       <div className="command-stack">
         <CommandButton icon={<Plus size={15} />} label="新建任务" onClick={props.startNewThread} />
         <CommandButton icon={<Search size={15} />} label="命令" onClick={props.openSearch} />
-        <CommandButton icon={<Settings size={15} />} label="详情" onClick={() => props.openInfoTab("details")} />
+        <CommandButton icon={<Settings size={15} />} label="详情" onClick={props.openInfoPane} />
       </div>
       <section className="project-tree">
         <div className="section-pill-row">
@@ -965,8 +940,6 @@ function ThreadPane(props: {
   sendBusy: boolean;
   backToList: () => void;
   openSearch: () => void;
-  openInfo: () => void;
-  openInfoTab: (tab: InfoTab) => void;
   copyText: (text: string) => Promise<void>;
   desktop: boolean;
   editingTitle: boolean;
@@ -982,7 +955,21 @@ function ThreadPane(props: {
   const metaItems = threadMetaItems(props.project, props.thread, level);
   const showRunStrip = props.status.className === "running" || props.status.className === "error";
   const dragDepth = useRef(0);
+  const timelineRef = useRef<HTMLElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
+
+  function focusLatestProgress() {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    const digests = timeline.querySelectorAll<HTMLElement>(".process-digest");
+    const latest = digests[digests.length - 1];
+    if (latest) {
+      if (latest instanceof HTMLDetailsElement) latest.open = true;
+      latest.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    timeline.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
+  }
 
   function handleDragEnter(event: React.DragEvent<HTMLDivElement>) {
     if (!dragCarriesFiles(event)) return;
@@ -1020,14 +1007,6 @@ function ThreadPane(props: {
 
   return (
     <>
-      <header className="mobile-task-bar">
-        <IconButton title="返回任务列表" onClick={props.backToList}><ChevronLeft /></IconButton>
-        <div className="mobile-task-title">
-          <strong>任务会话</strong>
-          <span>{props.project?.name || "uv-agent"}</span>
-        </div>
-        <IconButton title="任务信息" onClick={props.openInfo}><Info /></IconButton>
-      </header>
       <header className="thread-head">
         <IconButton title="返回" className="mobile-only" onClick={props.backToList}><ChevronLeft /></IconButton>
         <div className="thread-heading">
@@ -1062,14 +1041,14 @@ function ThreadPane(props: {
       {showRunStrip && (
         <>
           <div className="thread-floating-status" aria-hidden="false">
-            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("details")} />
+            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openProgress={focusLatestProgress} />
           </div>
           <div className="mobile-status-ribbon">
-            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openEvents={() => props.openInfoTab("details")} />
+            <ThreadRunStrip thread={props.thread} status={props.status} level={level} openProgress={focusLatestProgress} />
           </div>
         </>
       )}
-      <section id="timeline" className="timeline">
+      <section id="timeline" className="timeline" ref={timelineRef}>
         {rows.length ? rows : <div className="timeline-empty">{props.thread ? "暂无记录" : "暂无任务"}</div>}
       </section>
       <form className="composer" onSubmit={props.submitComposer}>
@@ -1424,17 +1403,17 @@ function collectDisplayItems(props: React.ComponentProps<typeof ThreadPane>) {
   thread,
   status,
   level,
-  openEvents,
+  openProgress,
 }: {
   thread: Thread | null;
   status: Status;
   level: string;
-  openEvents: () => void;
+  openProgress: () => void;
 }) {
   const detail = threadRunDetail(thread, status, level);
-  const action = "查看详情";
+  const action = "查看进展";
   return (
-    <button className={clsx("thread-run-strip", status.className)} type="button" title={action} aria-label={`${threadRunTitle(thread, status)} ${detail}，${action}`} onClick={openEvents}>
+    <button className={clsx("thread-run-strip", status.className)} type="button" title={action} aria-label={`${threadRunTitle(thread, status)} ${detail}，${action}`} onClick={openProgress}>
       <span className="run-dot" />
       <span className="run-main">
         <strong>{threadRunTitle(thread, status)}</strong>
@@ -1734,7 +1713,7 @@ function CommandPalette({
   commands,
   startNewThread,
   selectThread,
-  openInfoTab,
+  openInfoPane,
   setComposerText,
   focusComposer,
   clearComposer,
@@ -1751,7 +1730,7 @@ function CommandPalette({
   commands: CommandItemSummary[];
   startNewThread: () => void;
   selectThread: (threadId: string) => void;
-  openInfoTab: (tab: InfoTab) => void;
+  openInfoPane: () => void;
   setComposerText: (value: string) => void;
   focusComposer: () => void;
   clearComposer: () => void;
@@ -1788,7 +1767,7 @@ function CommandPalette({
       title: "任务面板",
       rows: [
         currentThread ? { title: "重命名任务", meta: currentTitle, keywords: "rename title 重命名", action: () => run(startEditingTitle) } : null,
-        { title: "查看详情", meta: "运行与附件", keywords: "details events activity status attachments 详情 运行 附件", action: () => run(() => openInfoTab("details")) },
+        { title: "查看详情", meta: "线程信息", keywords: "details events activity status attachments 详情 运行 附件", action: () => run(openInfoPane) },
       ],
     },
     {

@@ -14,12 +14,9 @@ import {
 import type {
   ActivityEntry,
   AttachmentDraft,
-  EventFilter,
-  InfoTab,
   MaterialEntry,
   ProjectInfo,
   RemoteCapabilities,
-  RemoteConfig,
   Status,
   Thread,
   TimelineEvent,
@@ -66,20 +63,11 @@ function PanelIconButton({ title, onClick, className, children }: { title: strin
 export function InfoPane(props: {
   thread: Thread | null;
   project: ProjectInfo | null;
-  config: RemoteConfig | null;
   capabilities: RemoteCapabilities | null;
   events: TimelineEvent[];
   liveEvents: TimelineEvent[];
   attachments: AttachmentDraft[];
-  infoTab: InfoTab;
-  setInfoTab: (tab: InfoTab) => void;
-  eventFilter: EventFilter;
-  setEventFilter: (filter: EventFilter) => void;
   close: () => void;
-  db: IDBDatabase | null;
-  lastSeq: number;
-  connection: string;
-  runningCount: number;
   status: Status;
 }) {
   const paneTitle = props.thread?.title || props.project?.name || "远程工作区";

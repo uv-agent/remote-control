@@ -1518,47 +1518,8 @@ body[data-connection="error"] .connection-dot {
   background: var(--page);
 }
 
-.mobile-task-bar {
-  display: flex;
-  min-height: 44px;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 8px;
-  border-bottom: 1px solid var(--line);
-  background: var(--header);
-}
-
-.mobile-task-title {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.mobile-task-title strong,
-.mobile-task-title span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mobile-task-title strong {
-  color: var(--text-strong);
-  font-size: 15px;
-  font-weight: 650;
-  line-height: 20px;
-}
-
-.mobile-task-title span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
 .thread-head .mobile-only {
-  display: none;
+  display: inline-grid;
 }
 
 .thread-head,
@@ -5139,7 +5100,6 @@ body[data-theme="light"] .desktop-rail {
 }
 
 body[data-theme="light"] .thread-head,
-body[data-theme="light"] .mobile-task-bar,
 body[data-theme="light"] .info-head {
   background: var(--surface);
 }
@@ -5536,10 +5496,6 @@ body[data-theme="light"] .info-head h2 {
     background: var(--rail);
   }
 
-  .mobile-task-bar {
-    display: none;
-  }
-
   .thread-pane,
   .info-pane {
     min-height: 100dvh;
@@ -5587,6 +5543,10 @@ body[data-theme="light"] .info-head h2 {
     padding: 0 9px 0 17px;
     background: var(--page);
     flex-wrap: nowrap;
+  }
+
+  .thread-head .mobile-only {
+    display: none;
   }
 
   .thread-heading {

@@ -140,7 +140,6 @@ export type Status = {
   className: "running" | "done" | "error" | "muted";
 };
 
-export type InfoTab = "details" | "overview" | "events" | "attachments" | "status";
 export type EventFilter = "all" | "message" | "tool" | "system" | "attachment";
 export type ThemeName = "deep" | "light";
 export type ThreadFilter = "all" | "running" | "done" | "attention";
